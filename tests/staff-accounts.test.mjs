@@ -77,7 +77,11 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     assert.equal((await signIn('admin')).status, 503);
     const staffLogin = new StaffLogin(null, env);
     let delegated = 0;
+    let dashboards = 0;
     env.STAFF_LOGIN = { getByName(name) {
+      if (name === 'staff-dashboard') {
+        return { fetch(request) { dashboards++; return staffLogin.fetch(request); } };
+      }
       assert.equal(name, 'staff-login');
       return { fetch(request) { delegated++; return staffLogin.fetch(request); } };
     } };
@@ -100,6 +104,8 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     database.prepare('INSERT INTO firebase_staff_sessions VALUES(?,?,?,?)')
       .run(createHash('sha256').update(legacyToken).digest('hex'), 'admin', 1, storedExpiry);
     assert.equal((await request('dashboard', { cookie: 'kv_firebase_staff=' + legacyToken })).status, 200);
+    assert.equal(dashboards, 1);
+    assert.equal((await request('dashboard', { cookie: 'kv_guest='+'a'.repeat(43) })).status, 401);
     const independentAdmin = session(await signIn('admin'));
     assert.notEqual(admin, independentAdmin);
     const accountList = await request('accounts', { cookie: admin });
