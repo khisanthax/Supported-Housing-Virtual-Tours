@@ -76,17 +76,27 @@ async function json(request) {
   } catch { fail(400,'Invalid JSON.'); }
 }
 
-export default {
-  async fetch(request,env) {
-    try { return await route(request,env); }
-    catch (error) {
-      if (!error.status) console.error('Prototype request failed:',error.message);
-      return output({error:error.status ? error.message : 'The prototype could not complete this request.'},error.status || 500);
-    }
+async function handleRequest(request,env,staffLoginOnly=false) {
+  try { return await route(request,env,staffLoginOnly); }
+  catch (error) {
+    if (!error.status) console.error('Prototype request failed:',error.message);
+    return output({error:error.status ? error.message : 'The prototype could not complete this request.'},error.status || 500);
   }
-};
+}
 
-async function route(request,env) {
+export default { fetch: (request,env) => handleRequest(request,env) };
+
+export class StaffLogin {
+  constructor(_state,env) {
+    this.env=env;
+  }
+
+  fetch(request) {
+    return handleRequest(request,this.env,true);
+  }
+}
+
+async function route(request,env,staffLoginOnly) {
   const url=new URL(request.url);
   const local = env.LOCAL_SYNTHETIC_ONLY==='1' && ['localhost','127.0.0.1'].includes(url.hostname);
   const pilot = env.SYNTHETIC_EDGE_PILOT==='1' && url.protocol==='https:' &&
@@ -96,13 +106,21 @@ async function route(request,env) {
   const path=url.pathname;
   const method=request.method;
   if (method!=='GET' && request.headers.get('Origin')!==url.origin) fail(403,'Invalid request origin.');
+  const individualAccounts=env.STAFF_ACCOUNTS==='1';
+  const namedLogin=individualAccounts && method==='POST' && path==='/api/staff/sign-in';
+  if (staffLoginOnly && !namedLogin) fail(404,'Not found.');
+  if (!staffLoginOnly && namedLogin && env.STAFF_LOGIN_BACKEND==='durable-object') {
+    if (!env.STAFF_LOGIN) fail(503,'Staff sign-in is temporarily unavailable.');
+    const forwarded=new Request(request);
+    forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
+    return env.STAFF_LOGIN.getByName('staff-login').fetch(forwarded);
+  }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>stmt(sql,...args).first();
   const all=async (sql,...args)=>(await stmt(sql,...args).all()).results;
   const run=(sql,...args)=>stmt(sql,...args).run();
   const now=Date.now();
-  const individualAccounts=env.STAFF_ACCOUNTS==='1';
   const staffCredential=individualAccounts ? request.headers.get('Cookie')?.split(';').map(part=>part.trim())
     .find(part=>part.startsWith('kv_firebase_staff='))?.slice('kv_firebase_staff='.length) ?? '' : '';
   const opaqueStaffCookie=tokenPattern.test(staffCredential);
@@ -138,7 +156,7 @@ async function route(request,env) {
     ...[apartment,...(published?[now]:[])]
   );
   const minute=Math.floor(now/60000);
-  const client=request.headers.get('CF-Connecting-IP') || 'local';
+  const client=request.headers.get(staffLoginOnly?'X-Staff-Login-Client':'CF-Connecting-IP') || 'local';
   const attemptSql=`INSERT INTO attempts VALUES(?,1) ON CONFLICT(bucket)
     DO UPDATE SET count=count+1 WHERE count<8 RETURNING count`;
   const attemptBucket=(scope,identity=client)=>minute+':'+hash(scope+':'+identity);
