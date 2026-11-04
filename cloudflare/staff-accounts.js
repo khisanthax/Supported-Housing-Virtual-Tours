@@ -11,10 +11,12 @@ function updateResetField() {
   showField(manage.elements.password, passwordAccounts && manage.elements.action.value === 'reset');
 }
 manage.elements.action.addEventListener('change', updateResetField);
+manage.elements.username.addEventListener('change', () => { manage.elements.password.value = ''; });
 async function request(method, body) {
   const response = await fetch('/api/staff/accounts', {
     method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
+  if (response.status === 401) location.replace('/staff');
   const data = await response.json();
   if (!response.ok) throw new Error(data.error);
   return data;
@@ -35,8 +37,12 @@ async function refresh() {
     item.textContent = account.username + ' · ' + account.role + (account.disabled ? ' · Disabled' : '');
     return item;
   }));
+  const selected = manage.elements.username.value;
   manage.elements.username.replaceChildren(...accounts.filter(account => account.username !== currentUsername)
     .map(account => new Option(account.username, account.username)));
+  if (Array.from(manage.elements.username.options).some(option => option.value === selected)) {
+    manage.elements.username.value = selected;
+  }
   create.querySelector('button').disabled = false;
   manage.querySelector('button').disabled = !manage.elements.username.options.length;
 }
@@ -47,7 +53,9 @@ for (const [form, method] of [[create, 'POST'], [manage, 'PATCH']]) {
     button.disabled = true;
     try {
       await request(method, Object.fromEntries(new FormData(form)));
+      const selected = manage.elements.username.value;
       form.reset();
+      if (form === manage) manage.elements.username.value = selected;
       updateResetField();
       await refresh();
       message.textContent = 'Account updated.';
