@@ -103,19 +103,22 @@ async function route(request,env) {
   const run=(sql,...args)=>stmt(sql,...args).run();
   const now=Date.now();
   const individualAccounts=env.STAFF_ACCOUNTS==='1';
-  const staffCredential=request.headers.get('Cookie')?.split(';').map(part=>part.trim())
-    .find(part=>part.startsWith('kv_firebase_staff='))?.slice('kv_firebase_staff='.length) ?? '';
-  const staffTokenHash=staffCredential.length<=3544 ? hash(staffCredential) : '';
-  const firebaseIdToken=staffCredential.slice(44);
+  const staffCredential=individualAccounts ? request.headers.get('Cookie')?.split(';').map(part=>part.trim())
+    .find(part=>part.startsWith('kv_firebase_staff='))?.slice('kv_firebase_staff='.length) ?? '' : '';
+  const opaqueStaffCookie=tokenPattern.test(staffCredential);
+  const legacyStaffCookie=staffCredential.length<=3544 && staffCredential[43]==='~' &&
+    tokenPattern.test(staffCredential.slice(0,43));
+  const staffTokenHash=opaqueStaffCookie || legacyStaffCookie ? hash(staffCredential) : '';
   const firebaseReady=env.FIREBASE_PROJECT_ID && env.FIREBASE_AUTH_API_KEY;
   const staff=async()=>{
     if (!individualAccounts) return one('SELECT token FROM sessions WHERE token=? AND share IS NULL AND expires>?',cookie(request,'kv_staff'),now);
-    if (!firebaseReady || staffCredential[43]!=='~' || !tokenPattern.test(staffCredential.slice(0,43))) return null;
+    if (!firebaseReady || !staffTokenHash) return null;
     const account=await one(`SELECT a.username,a.role,a.revision,a.firebase_uid FROM firebase_staff_sessions s
       JOIN firebase_staff_accounts a USING(username)
       WHERE s.token=? AND s.expires>? AND a.disabled=0 AND s.revision=a.revision`,staffTokenHash,now);
-    if (!account) return null;
-    const claims=await verifyFirebaseToken(firebaseIdToken,env.FIREBASE_PROJECT_ID,Date.now());
+    if (!account || opaqueStaffCookie) return account;
+    // Existing JWT-bearing sessions retain their original validation until they expire.
+    const claims=await verifyFirebaseToken(staffCredential.slice(44),env.FIREBASE_PROJECT_ID,Date.now());
     return claims?.sub===account.firebase_uid ? account : null;
   };
   const guest=()=>one(`SELECT s.id FROM sessions g JOIN shares s ON s.id=g.share
@@ -209,7 +212,8 @@ async function route(request,env) {
       const {idToken}=await response.json();
       const claims=await verifyFirebaseToken(idToken,env.FIREBASE_PROJECT_ID,Date.now());
       if (claims?.sub!==account.firebase_uid) fail(401,'Sign-in failed.');
-      const token=secret()+'~'+idToken, expires=claims.exp*1000;
+      // The Firebase token is consumed here. Only a random, revocable session ID leaves the Worker.
+      const token=secret(), expires=claims.exp*1000;
       const result=await db.batch([
         stmt('DELETE FROM firebase_staff_sessions WHERE expires<=? OR token=?',now,staffTokenHash),
         stmt(`INSERT INTO firebase_staff_sessions SELECT ?,username,revision,? FROM firebase_staff_accounts

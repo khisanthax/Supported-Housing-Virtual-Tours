@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import worker from '../cloudflare/worker.mjs';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 
 test('individual accounts enforce roles, reset and disable immediately, and expire sessions', async t => {
   const database = new DatabaseSync(':memory:');
@@ -41,7 +41,7 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     const key = { ...publicKey.export({ format: 'jwk' }), kid: 'fixture-key' };
     const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
     const passwords = new Map([['admin@example.test', password], ['editor@example.test', password]]);
-    let resetEmail, badSignature = false;
+    let resetEmail, lastIdToken, badSignature = false;
     t.mock.method(globalThis, 'fetch', async (url, options) => {
       if (url.startsWith('https://www.googleapis.com/')) return Response.json({ keys: [key] });
       const input = JSON.parse(options.body);
@@ -57,7 +57,8 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
         sub: input.email.split('@')[0], exp: now + 3600, iat: now, auth_time: now, firebase: { sign_in_provider: 'password' } });
       const content = head + '.' + body;
       const signature = sign('sha256', Buffer.from(badSignature ? content + 'tampered' : content), privateKey);
-      return Response.json({ idToken: content + '.' + signature.toString('base64url') });
+      lastIdToken = content + '.' + signature.toString('base64url');
+      return Response.json({ idToken: lastIdToken });
     });
     database.exec("INSERT INTO firebase_staff_accounts(username,firebase_uid,email,role) VALUES('admin','admin','admin@example.test','administrator')");
     const request = (path, { method = 'GET', cookie = '', body, ip = 'test' } = {}) =>
@@ -75,6 +76,14 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     assert.equal((await signIn('admin')).status, 401);
     badSignature = false;
     const admin = session(await signIn('ADMIN'));
+    assert.match(admin, /^kv_firebase_staff=[A-Za-z0-9_-]{43}$/);
+    const storedExpiry = database.prepare('SELECT expires FROM firebase_staff_sessions').get().expires;
+    const claims = JSON.parse(Buffer.from(lastIdToken.split('.')[1], 'base64url'));
+    assert.equal(storedExpiry, claims.exp * 1000);
+    const legacyToken = 'a'.repeat(43) + '~' + lastIdToken;
+    database.prepare('INSERT INTO firebase_staff_sessions VALUES(?,?,?,?)')
+      .run(createHash('sha256').update(legacyToken).digest('hex'), 'admin', 1, storedExpiry);
+    assert.equal((await request('dashboard', { cookie: 'kv_firebase_staff=' + legacyToken })).status, 200);
     const independentAdmin = session(await signIn('admin'));
     assert.notEqual(admin, independentAdmin);
     const accountList = await request('accounts', { cookie: admin });
