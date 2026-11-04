@@ -79,6 +79,9 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     $('start-badge').hidden = active.id !== draft.tour.startRoom;
     $('set-start').disabled = active.id === draft.tour.startRoom;
     $('delete-room').disabled = draft.tour.rooms.length === 1;
+    const position = draft.tour.rooms.findIndex(item => item.id === active.id);
+    $('room-earlier').disabled = position <= 0;
+    $('room-later').disabled = position >= draft.tour.rooms.length - 1;
     if (editRoomId !== active.id) selected = null;
     editRoomId = active.id;
     renderDoors();
@@ -174,6 +177,13 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     modify(active => { active.name = name; }, 'Room name saved.');
   });
   $('set-start').addEventListener('click', () => modify((active, tour) => { tour.startRoom = active.id; }, 'Start room saved.'));
+  for (const [id, offset] of [['room-earlier', -1], ['room-later', 1]]) {
+    $(id).addEventListener('click', () => modify((active, tour) => {
+      const position = tour.rooms.indexOf(active);
+      const destination = position + offset;
+      [tour.rooms[position], tour.rooms[destination]] = [tour.rooms[destination], tour.rooms[position]];
+    }, 'Room order saved.'));
+  }
   $('set-view').addEventListener('click', () => {
     const position = currentView();
     if (!position) return;

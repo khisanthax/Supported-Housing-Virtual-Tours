@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Staff accounts · Supported Housing</title><link rel="stylesheet" href="/sharing/sharing.css">
+<script type="module" src="/sharing/staff-accounts.js"></script></head>
+<body><main class="narrow"><p><a href="/staff">Back to staff catalog</a></p>
+<h1>Staff accounts</h1>
+<p id="message" role="status"></p>
+<section class="panel"><h2>Link a Firebase account</h2><form id="create">
+<label>Username<input name="username" required minlength="3" maxlength="64" autocomplete="off"></label>
+<label>Role<select name="role"><option value="editor">Staff Editor</option><option value="administrator">Administrator</option></select></label>
+<label>Firebase user UID<input name="firebaseUid" required maxlength="128" autocomplete="off"></label>
+<label>Firebase email<input name="email" required maxlength="254" type="email" autocomplete="off"></label>
+<button>Link account</button></form></section>
+<section class="panel"><h2>Manage an account</h2>
+<ul id="accounts"></ul>
+<form id="manage"><label>Account<select name="username" required></select></label>
+<label>Action<select name="action"><option value="reset">Send password reset email</option><option value="disable">Disable account</option><option value="enable">Enable account</option></select></label>
+<button>Apply change</button></form></section>
+</main></body></html>

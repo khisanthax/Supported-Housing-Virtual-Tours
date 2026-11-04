@@ -23,6 +23,16 @@ const guestViewer = index.replace('<body>','<body data-guest="true">')
   .replace('<main>','<main><p><a href="/guest">← Back to shared apartments</a></p>')
   .replace('href="./"','href="/guest"');
 await put('viewer/index.html',guestViewer);
+const offlinePanel = await readFile(new URL('sharing/offline-panel.html',root),'utf8');
+await put('offline/index.html',guestViewer
+  .replace('data-guest="true"', 'data-offline="true" class="offline-locked"')
+  .replaceAll('/viewer/', '/offline/')
+  .replace('href="/guest">← Back to shared apartments', 'href="/staff">← Staff catalog')
+  .replace('<head>', '<head><link rel="manifest" href="/offline/app.webmanifest"><link rel="stylesheet" href="/offline/offline.css"><meta name="theme-color" content="#254e3e">')
+  .replace('<main>', '<main>' + offlinePanel));
+for (const name of ['app.webmanifest','sw.js','offline.js','offline-store.js','offline.css','icon-192.png','icon-512.png']) {
+  await copy('sharing/'+name,'offline/'+name);
+}
 await put('staff/editor/index.html',index
   .replace('<main>','<main><p><a href="/staff">← Staff apartment catalog</a></p>')
   .replace('Add room JPEGs<input id="add-rooms" type="file" accept="image/jpeg,.jpg,.jpeg"', 'Add JPEGs or ZIP<input id="add-rooms" type="file" accept="image/jpeg,.jpg,.jpeg,.zip,application/zip"')
@@ -31,6 +41,7 @@ await put('staff/editor/index.html',index
 for (const name of common) {
   await copy('dist/'+name,'viewer/'+name);
   await copy('dist/'+name,'staff/editor/'+name);
+  await copy('dist/'+name,'offline/'+name);
 }
 for (const name of ['editor.css','tour-package.js']) await copy('dist/'+name,'staff/editor/'+name);
 for (const name of ['living.jpg','kitchen.jpg','bedroom.jpg']) await copy('cloudflare/sample-images/'+name,'staff/editor/images/'+name);
@@ -55,11 +66,30 @@ await put('staff/editor/tour-editor.js',"import { importBatch } from './batch-dr
   .replace('Backup imported and saved on this device.','Backup imported and saved as a cloud draft.'));
 for (const name of ['staff.html','staff-login.html','guest.html','staff.js','staff-login.js','guest.js','sharing.css']) {
   let content = await readFile(new URL('sharing/'+name,root),'utf8');
+  if (name === 'staff-login.html') content = content
+    .replace('<label>Staff passphrase', '<label id="username-field" hidden>Username<input name="username" maxlength="64" autocomplete="username" disabled></label><label id="password-field">Staff passphrase')
+    .replace('<button>Sign in','<button disabled>Sign in');
+  if (name === 'staff-login.js') content = content
+    .replace("form.addEventListener",`let individualAccounts;
+fetch('/api/staff/sign-in-mode').then(response => {
+  if (!response.ok) throw new Error();
+  return response.json();
+}).then(mode => {
+  individualAccounts = mode.individualAccounts;
+  document.querySelector('#username-field').hidden = !individualAccounts;
+  form.elements.username.disabled = !individualAccounts;
+  form.elements.username.required = individualAccounts;
+  document.querySelector('#password-field').firstChild.textContent = individualAccounts ? 'Password' : 'Staff passphrase';
+  form.querySelector('button').disabled = false;
+}).catch(() => { document.querySelector('#message').textContent = 'Sign-in is unavailable. Reload and try again.'; });
+form.addEventListener`)
+    .replace('JSON.stringify({passphrase:form.elements.passphrase.value})',
+      'JSON.stringify(individualAccounts ? {username:form.elements.username.value,password:form.elements.passphrase.value} : {passphrase:form.elements.passphrase.value})');
   if (name === 'staff.html') content = content
+    .replace('<ul id="catalog">','<p><a hidden id="staff-accounts" href="/staff/accounts">Manage staff accounts</a></p><ul id="catalog">')
     .replace('Open tour editor','Start an apartment')
     .replace('<ul id="catalog"></ul>','<ul id="catalog"></ul><button class="secondary" id="cleanup">Clean up unused storage</button>')
     .replace('Import an approved .shtour package. A new apartment stays private until shared. Replacing an apartment updates it for guests who already have access.','Create or import a draft. Publish it when it is ready for guest links. Use synthetic images in this pilot.')
-    .replace('<a class="button secondary" href="/offline/">Available Offline</a>','')
     .replace('<label>Guest passphrase<input id="passphrase" type="password" minlength="12" maxlength="256" autocomplete="new-password"><small>At least 12 characters.</small></label>','<label>Phrase length<select id="word-count"><option value="3">3 words</option><option value="5">5 words</option><option value="7">7 words</option></select></label>')
     .replace('<button id="copy">Copy link</button>','<button id="copy">Copy Link</button><label>Generated access phrase<input id="generated-code" readonly style="font-size:1.4rem;font-weight:700"></label><div class="actions"><button id="copy-phrase">Copy Phrase</button><button id="copy-invitation">Copy Invitation</button></div>')
     .replaceAll('passphrase','access phrase')
@@ -73,7 +103,7 @@ for (const name of ['staff.html','staff-login.html','guest.html','staff.js','sta
     .replaceAll('its passphrase','its access phrase or code');
   if (name === 'staff.js') {
     content = "import { exportApartment, importPackage } from '/sharing/worker-import.js';\n" + content
-      .replace(/  const channel = new BroadcastChannel\('housing-staff-offline'\);[\s\S]*?  await storage\('clear'\);\n/,'')
+      .replace("data = await api('dashboard');","data = await api('dashboard');\n  $('staff-accounts').hidden = data.staffRole !== 'administrator';")
       .replace("await api('apartments'+(replacement ? '?replace='+encodeURIComponent(replacement) : ''),'POST',file);","await importPackage(file,replacement,data.apartments.find(item=>item.id===replacement)?.version);")
       .replaceAll('Import an apartment first.', 'Create and publish an apartment first.')
       .replace("$('passphrase').required = $('expiration').required = !editing;","$('expiration').required = !editing;")
@@ -115,21 +145,26 @@ $('create').onclick`)
   });
   $('create').onclick`)
       .replace("$('catalog').replaceChildren(...data.apartments.map(a=>el('li',a.title)));", `$('catalog').replaceChildren(...data.apartments.map(a=>{
-    const item=el('li',a.title + (a.published ? ' · Published' : ' · Private draft'));
+    const item=el('li',a.title + (a.archived ? ' · Archived' : a.published ? ' · Published' : ' · Private draft'));
     const controls=el('div',null,'actions');
     const edit=el('a','Edit draft','button secondary');
     edit.href='/staff/editor/?apartment='+a.id;
     const backup=el('button','Export .shtour','secondary');
     backup.onclick=()=>operate(()=>exportApartment(a.id));
-    controls.append(edit,backup);
-    for(const [action,label] of [['publish','Publish latest draft'],['unpublish','Unpublish'],['remove','Remove']]){
+    if(!a.archived) controls.append(edit);
+    controls.append(backup);
+    const lifecycle=a.archived ? [['restore','Restore as draft']] :
+      [['publish','Publish latest draft'],['unpublish','Unpublish'],['archive','Archive'],['remove','Remove']];
+    for(const [action,label] of lifecycle){
       if(action==='unpublish' && !a.published) continue;
       const button=el('button',label,action==='remove'?'danger':'secondary');
       button.onclick=()=>operate(async()=>{
         if(action==='remove' && !confirm('Remove this apartment and hide it from all guest links? Export a backup first if needed.')) return;
         await api('apartments/'+a.id,'PATCH',{action,expectedVersion:a.version});
         await refresh();
-        say(action==='publish'?'Publication requested. New images may take about a minute to appear.':'Apartment '+(action==='remove'?'removed.':'unpublished.'));
+        say({publish:'Publication requested. New images may take about a minute to appear.',
+          remove:'Apartment removed.',unpublish:'Apartment unpublished.',
+          archive:'Apartment archived.',restore:'Apartment restored as an unpublished draft.'}[action]);
       });
       controls.append(button);
     }
@@ -140,6 +175,10 @@ $('create').onclick`)
   if (name === 'staff.html') content = content
     .replace(/<label hidden id="rotation-length">[\s\S]*?<\/label>/,'')
     .replace('</main>', '<dialog id="rotate-dialog"><form method="dialog"><h2>Regenerate guest phrase?</h2><p>The old phrase or code and all current guest sessions will stop working. The existing link still works with the new phrase.</p><label>New phrase length<select id="rotate-count"><option value="3">3 words</option><option value="5">5 words</option><option value="7">7 words</option></select></label><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="rotate">Regenerate phrase</button></div></form></dialog></main>');
+  if (name === 'staff.html') content = content
+    .replaceAll('<option value="3">3 words</option>', '<option value="0">128-bit code</option><option value="3">3 words</option>')
+    .replaceAll('Phrase length','Access code format').replaceAll('New phrase length','New access code format')
+    .replaceAll('Generated access phrase','Generated access code or phrase');
   await put('sharing/'+name,content);
 }
 await copy('cloudflare/worker-import.js','sharing/worker-import.js');
@@ -152,3 +191,5 @@ if (!/^GUEST_CODE_KEY=/m.test(settings)) settings += `\nGUEST_CODE_KEY=${randomB
 if (!/^STAFF_RANDOM_HASH=/m.test(settings)) settings += `\nSTAFF_RANDOM_HASH=${staffHash}\n`;
 if (!/^LOCAL_SYNTHETIC_ONLY=/m.test(settings)) settings += '\nLOCAL_SYNTHETIC_ONLY=1\n';
 await writeFile(vars,settings.replace(/^STAFF_(?:SALT|VERIFIER)=.*\r?\n/gm,''));
+await copy('cloudflare/staff-accounts.html','sharing/staff-accounts.html');
+await copy('cloudflare/staff-accounts.js','sharing/staff-accounts.js');

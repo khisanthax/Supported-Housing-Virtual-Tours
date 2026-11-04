@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import words from './phrase-words.mjs';
+import { emailPattern, firebaseRequest, firebaseUidPattern, normalizeUsername, usernamePattern, verifyFirebaseToken } from './firebase-auth.mjs';
 import { inspectJpeg, MAX_ROOMS } from '../dist/tour-package.js';
 import { validateApartment } from '../dist/tour-data.js';
 
@@ -24,12 +25,20 @@ export function generatePhrase(length=3) {
 }
 const phraseVerifier = (key,share,salt,phrase) =>
   'phrase-v1:'+guestCodeVerifier(key,share,salt,phrase).slice('hmac-v1:'.length);
+function invitationCode(key,share,salt,wordCount) {
+  if (wordCount===undefined || wordCount===0) {
+    const code=randomBytes(16).toString('base64url');
+    return {code,verifier:guestCodeVerifier(key,share,salt,code)};
+  }
+  const code=generatePhrase(wordCount);
+  return {code,verifier:phraseVerifier(key,share,salt,code)};
+}
 const validPass = (value,min) => typeof value==='string' && value.length>=min && new TextEncoder().encode(value).length<=256;
 const headers = {
   'Cache-Control':'private, no-store',
   'Referrer-Policy':'no-referrer',
   'X-Content-Type-Options':'nosniff',
-  'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+  'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 };
 function output(value,status=200,extra={}) {
   return Response.json(value,{status,headers:{...headers,...extra}});
@@ -93,10 +102,29 @@ async function route(request,env) {
   const all=async (sql,...args)=>(await stmt(sql,...args).all()).results;
   const run=(sql,...args)=>stmt(sql,...args).run();
   const now=Date.now();
-  const staff=()=>one('SELECT token FROM sessions WHERE token=? AND share IS NULL AND expires>?',cookie(request,'kv_staff'),now);
+  const individualAccounts=env.STAFF_ACCOUNTS==='1';
+  const staffCredential=request.headers.get('Cookie')?.split(';').map(part=>part.trim())
+    .find(part=>part.startsWith('kv_firebase_staff='))?.slice('kv_firebase_staff='.length) ?? '';
+  const staffTokenHash=staffCredential.length<=3544 ? hash(staffCredential) : '';
+  const firebaseIdToken=staffCredential.slice(44);
+  const firebaseReady=env.FIREBASE_PROJECT_ID && env.FIREBASE_AUTH_API_KEY;
+  const staff=async()=>{
+    if (!individualAccounts) return one('SELECT token FROM sessions WHERE token=? AND share IS NULL AND expires>?',cookie(request,'kv_staff'),now);
+    if (!firebaseReady || staffCredential[43]!=='~' || !tokenPattern.test(staffCredential.slice(0,43))) return null;
+    const account=await one(`SELECT a.username,a.role,a.revision,a.firebase_uid FROM firebase_staff_sessions s
+      JOIN firebase_staff_accounts a USING(username)
+      WHERE s.token=? AND s.expires>? AND a.disabled=0 AND s.revision=a.revision`,staffTokenHash,now);
+    if (!account) return null;
+    const claims=await verifyFirebaseToken(firebaseIdToken,env.FIREBASE_PROJECT_ID,Date.now());
+    return claims?.sub===account.firebase_uid ? account : null;
+  };
   const guest=()=>one(`SELECT s.id FROM sessions g JOIN shares s ON s.id=g.share
     WHERE g.token=? AND g.expires>? AND s.expires>? AND s.revoked IS NULL AND s.revision=g.revision`,cookie(request,'kv_guest'),now,now);
-  const requireStaff=async()=>{ if (!await staff()) fail(401,'Staff sign-in required.'); };
+  const requireStaff=async()=>{
+    const account=await staff();
+    if (!account) fail(401,'Staff sign-in required.');
+    return account;
+  };
   const requireGuest=async()=>{
     const session=await guest();
     if (!session) fail(401,'Reopen the guest link and enter its access code.');
@@ -132,10 +160,18 @@ async function route(request,env) {
   }
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/staff.html':'/sharing/staff-login.html');
+  if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});
+  if (method==='GET' && (path==='/staff/accounts' || path==='/sharing/staff-accounts.js')) {
+    if ((await requireStaff()).role!=='administrator') fail(403,'Administrator access required.');
+    return asset(path==='/staff/accounts'?'/sharing/staff-accounts.html':path);
+  }
   if (method==='GET' && ['/staff/editor/','/staff/editor/index.html'].includes(path) && !await staff()) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
+  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|vendor\/marzipano\.js)?$/.test(path)) {
+    return asset(path==='/offline/'?'/offline/index.html':path);
+  }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
   if (method==='GET' && (/^\/sharing\/(staff|worker-import)\.js$/.test(path) || path.startsWith('/staff/editor/'))) {
     await requireStaff();
@@ -146,8 +182,34 @@ async function route(request,env) {
     return asset(path);
   }
   if (method==='POST' && path==='/api/staff/sign-in') {
-    if (!keyPattern.test(env.STAFF_RANDOM_HASH ?? '')) fail(503,'Staff sign-in has not been configured.');
     await throttle('staff');
+    if (individualAccounts) {
+      const input=await json(request);
+      const username=normalizeUsername(input.username);
+      if (!firebaseReady) fail(503,'Staff sign-in has not been configured.');
+      if (!usernamePattern.test(username) || !validPass(input.password,1)) fail(401,'Sign-in failed.');
+      await throttle('staff-account',username);
+      const account=await one('SELECT firebase_uid,email,disabled,revision FROM firebase_staff_accounts WHERE username=?',username);
+      if (!account || account.disabled) fail(401,'Sign-in failed.');
+      const response=await firebaseRequest(env.FIREBASE_AUTH_API_KEY,'signInWithPassword',{
+        email:account.email,password:input.password,returnSecureToken:true
+      });
+      if (response.status===429) fail(429,'Too many attempts. Try again later.');
+      if (response.status>=500) fail(503,'Staff sign-in is temporarily unavailable.');
+      if (!response.ok) fail(401,'Sign-in failed.');
+      const {idToken}=await response.json();
+      const claims=await verifyFirebaseToken(idToken,env.FIREBASE_PROJECT_ID,Date.now());
+      if (claims?.sub!==account.firebase_uid) fail(401,'Sign-in failed.');
+      const token=secret()+'~'+idToken, expires=claims.exp*1000;
+      const result=await db.batch([
+        stmt('DELETE FROM firebase_staff_sessions WHERE expires<=? OR token=?',now,staffTokenHash),
+        stmt(`INSERT INTO firebase_staff_sessions SELECT ?,username,revision,? FROM firebase_staff_accounts
+          WHERE username=? AND disabled=0 AND revision=?`,hash(token),expires,username,account.revision)
+      ]);
+      if (!result[1].meta.changes) fail(401,'Sign-in failed.');
+      return output({ok:true},200,setCookie('kv_firebase_staff',token,Math.floor((expires-Date.now())/1000),url.protocol==='https:'));
+    }
+    if (!keyPattern.test(env.STAFF_RANDOM_HASH ?? '')) fail(503,'Staff sign-in has not been configured.');
     const {passphrase}=await json(request);
     if (!validPass(passphrase,16)) fail(401,'Sign-in failed.');
     if (!timingSafeEqual(Buffer.from(hash(passphrase),'hex'),Buffer.from(env.STAFF_RANDOM_HASH,'hex'))) fail(401,'Sign-in failed.');
@@ -173,10 +235,74 @@ async function route(request,env) {
     return session('kv_guest',share.id,share.revision,Math.min(share.expires,now+8*hour));
   }
   if (path.startsWith('/api/staff/')) {
-    await requireStaff();
+    const account=await requireStaff();
+    if (path==='/api/staff/accounts') {
+      if (account.role!=='administrator') fail(403,'Administrator access required.');
+      const administratorGuard=`EXISTS(SELECT 1 FROM firebase_staff_accounts a JOIN firebase_staff_sessions s USING(username)
+        WHERE a.username=? AND a.revision=? AND a.role='administrator' AND a.disabled=0
+        AND s.token=? AND s.revision=a.revision AND s.expires>?)`;
+      const administratorSession=()=>[account.username,account.revision,staffTokenHash,Date.now()];
+      if (method==='GET') return output({currentUsername:account.username,accounts:await all('SELECT username,role,disabled FROM firebase_staff_accounts ORDER BY username')});
+      if (method==='POST') {
+        const input=await json(request);
+        const username=normalizeUsername(input.username);
+        const {firebaseUid,email,role}=input;
+        if (!usernamePattern.test(username) || typeof firebaseUid!=='string' || !firebaseUidPattern.test(firebaseUid) ||
+          typeof email!=='string' || !emailPattern.test(email) || !['editor','administrator'].includes(role)) {
+          fail(400,'Enter a username, Firebase user UID, email and role.');
+        }
+        const result=await run(`INSERT INTO firebase_staff_accounts(username,firebase_uid,email,role)
+          SELECT ?,?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,username,firebaseUid,email,role,...administratorSession());
+        if (!result.meta.changes) fail(409,'Username or administrator session changed.');
+        return output({ok:true},201);
+      }
+      if (method==='PATCH') {
+        const input=await json(request);
+        const username=normalizeUsername(input.username);
+        if (!usernamePattern.test(username) || username===account.username) fail(400,'Choose another staff account.');
+        const reset=input.action==='reset';
+        if (!['reset','disable','enable'].includes(input.action)) fail(400,'Choose a valid account action.');
+        const target=await one('SELECT email FROM firebase_staff_accounts WHERE username=?',username);
+        if (!target) fail(404,'Staff account not found.');
+        const result=await run(`UPDATE firebase_staff_accounts SET disabled=CASE WHEN ? THEN disabled ELSE ? END,
+          revision=revision+1 WHERE username=? AND ${administratorGuard}`,Number(reset),Number(input.action==='disable'),username,...administratorSession());
+        if (!result.meta.changes) fail(409,'Account or administrator session changed.');
+        if (reset) {
+          await throttle('staff-reset',username);
+          const response=await firebaseRequest(env.FIREBASE_AUTH_API_KEY,'sendOobCode',{
+            requestType:'PASSWORD_RESET',email:target.email
+          });
+          if (!response.ok) fail(503,'Firebase could not send the reset email.');
+        }
+        return output({ok:true});
+      }
+    }
     if (method==='POST' && path==='/api/staff/sign-out') {
-      await run('DELETE FROM sessions WHERE token=?',cookie(request,'kv_staff'));
-      return output({ok:true},200,setCookie('kv_staff','',0,url.protocol==='https:'));
+      await run(individualAccounts?'DELETE FROM firebase_staff_sessions WHERE token=?':'DELETE FROM sessions WHERE token=?',individualAccounts?staffTokenHash:cookie(request,'kv_staff'));
+      return output({ok:true},200,setCookie(individualAccounts?'kv_firebase_staff':'kv_staff','',0,url.protocol==='https:'));
+    }
+    if (method==='GET' && path==='/api/staff/offline') {
+      const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,
+        (SELECT SUM(p.bytes) FROM json_each(v.photos) j JOIN photos p ON p.id=j.value) AS bytes
+        FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
+        AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
+        ORDER BY v.title`);
+      return output({apartments,now});
+    }
+    const offline=/^\/api\/staff\/offline\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
+    if (method==='GET' && offline) {
+      const [,apartment,,room]=offline;
+      const version=await one(`SELECT v.* FROM versions v WHERE v.apartment=?
+        AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
+        ORDER BY v.seq DESC LIMIT 1`,apartment);
+      if (!version) fail(404,'Offline tour not found.');
+      const revision=String(version.seq);
+      if (room) {
+        if (url.searchParams.get('revision')!==revision) fail(409,'The apartment changed. Download the new version.');
+        return tourAsset(version,room,env);
+      }
+      const images=await all(`SELECT j.key AS room,p.bytes FROM json_each(?) j JOIN photos p ON p.id=j.value`,version.photos);
+      return output({tour:JSON.parse(version.manifest),revision,expires:now+24*hour,images});
     }
     if (method==='POST' && path==='/api/staff/photos') {
       if (request.headers.get('Content-Type')!=='image/jpeg') fail(415,'Send one stitched JPEG.');
@@ -214,7 +340,7 @@ async function route(request,env) {
       const available=draftOnly;
       try {
         const saved=await run(`INSERT INTO versions SELECT ?,?,?,?,?,?
-          WHERE NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=2)
+          WHERE NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))
           AND COALESCE((SELECT MAX(seq) FROM versions WHERE apartment=?),0)=?
           AND (SELECT COUNT(*) FROM photos WHERE ready=1 AND id IN (${ids.map(()=>'?').join(',')}))=?`,
           apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,apartment,prior,...ids,ids.length);
@@ -231,7 +357,8 @@ async function route(request,env) {
       const state=await one('SELECT state FROM apartment_visibility WHERE apartment=?',apartment);
       if (!latest || state?.state===2) fail(404,'Apartment not found.');
       if (latest.seq!==expectedVersion) fail(409,'This apartment changed. Reopen it before continuing.');
-      const guard='?=(SELECT MAX(seq) FROM versions WHERE apartment=?) AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=2)';
+      if (state?.state===3 && action!=='restore') fail(409,'Restore the archived apartment before editing or publishing.');
+      const guard='?=(SELECT MAX(seq) FROM versions WHERE apartment=?) AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))';
       const args=[latest.seq,apartment,apartment];
       if (action==='publish') {
         if (JSON.parse(latest.manifest).rooms.some(room=>room.links.some(link=>link.pending))) fail(400,'Position every return arrow before publishing.');
@@ -242,9 +369,13 @@ async function route(request,env) {
           stmt(`DELETE FROM apartment_visibility WHERE apartment=? AND ${guard}`,apartment,...args)
         ]);
         if (!result[1].meta.changes) fail(409,'This apartment changed. Reopen it.');
-      } else if (action==='unpublish' || action==='remove') {
+      } else if (action==='restore') {
+        const result=await run(`UPDATE apartment_visibility SET state=1 WHERE apartment=? AND state=3
+          AND ?=(SELECT MAX(seq) FROM versions WHERE apartment=?)`,apartment,latest.seq,apartment);
+        if (!result.meta.changes) fail(409,'Only an archived apartment can be restored.');
+      } else if (['unpublish','remove','archive'].includes(action)) {
         const result=await run(`INSERT INTO apartment_visibility SELECT ?,? WHERE ${guard}
-          ON CONFLICT(apartment) DO UPDATE SET state=excluded.state`,apartment,action==='remove'?2:1,...args);
+          ON CONFLICT(apartment) DO UPDATE SET state=excluded.state`,apartment,{unpublish:1,remove:2,archive:3}[action],...args);
         if (!result.meta.changes) fail(409,'This apartment changed. Reopen it.');
       } else fail(400,'Unknown apartment action.');
       return output({ok:true});
@@ -258,7 +389,7 @@ async function route(request,env) {
     const draftRoute=/^\/api\/staff\/drafts\/([a-f0-9]{32})$/.exec(path);
     if (method==='GET' && draftRoute) {
       const apartment=draftRoute[1];
-      if (await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=2',apartment)) fail(404,'Tour not found.');
+      if (await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)',apartment)) fail(404,'Draft not found.');
       const version=await current(apartment);
       if (!version) fail(404,'Tour not found.');
       return output({tour:JSON.parse(version.manifest),photos:JSON.parse(version.photos),revision:version.seq});
@@ -291,6 +422,7 @@ async function route(request,env) {
     }
     if (method==='GET' && path==='/api/staff/dashboard') {
       const apartments=await all(`SELECT v.apartment AS id,v.title,v.seq AS version,v.available,
+        EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state=3) AS archived,
         NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment)
           AND EXISTS(SELECT 1 FROM versions p WHERE p.apartment=v.apartment AND p.available<?) AS published
         FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
@@ -300,7 +432,7 @@ async function route(request,env) {
         WHEN s.expires<=? THEN 'expired' ELSE 'active' END AS status,
         (SELECT json_group_array(p.apartment) FROM permissions p WHERE p.share=s.id) AS apartments
         FROM shares s ORDER BY s.expires DESC`,now);
-      return output({apartments,shares:shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}))});
+      return output({apartments,staffRole:account.role,shares:shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}))});
     }
     async function selection(apartments) {
       if (!Array.isArray(apartments) || !apartments.length || apartments.length>25 || new Set(apartments).size!==apartments.length ||
@@ -317,8 +449,7 @@ async function route(request,env) {
       if (!Number.isSafeInteger(input.expires) || input.expires<=now) fail(400,'Choose a future expiration.');
       await throttle('create');
       const token=secret(), share=id(), salt=id();
-      const code=generatePhrase(input.wordCount);
-      const verifier=phraseVerifier(env.GUEST_CODE_KEY,share,salt,code);
+      const {code,verifier}=invitationCode(env.GUEST_CODE_KEY,share,salt,input.wordCount);
       await db.batch([
         stmt('INSERT INTO shares(id,token,salt,verifier,expires) VALUES(?,?,?,?,?)',share,hash(token),salt,verifier,input.expires),
         ...apartments.map(a=>stmt('INSERT INTO permissions VALUES(?,?)',share,a))
@@ -329,9 +460,10 @@ async function route(request,env) {
     if (method==='POST' && rotation) {
       await throttle('create');
       const {wordCount}=await json(request);
-      const code=generatePhrase(wordCount), salt=id(), share=rotation[1];
+      const salt=id(), share=rotation[1];
+      const {code,verifier}=invitationCode(env.GUEST_CODE_KEY,share,salt,wordCount);
       const result=await run(`UPDATE shares SET salt=?,verifier=?,revision=revision+1
-        WHERE id=? AND expires>? AND revoked IS NULL`,salt,phraseVerifier(env.GUEST_CODE_KEY,share,salt,code),share,now);
+        WHERE id=? AND expires>? AND revoked IS NULL`,salt,verifier,share,now);
       if (!result.meta.changes) fail(404,'Active share not found.');
       return output({code});
     }
