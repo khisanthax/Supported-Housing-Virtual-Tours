@@ -223,7 +223,10 @@ async function route(request,env,privateStaffOnly) {
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/staff.html':'/sharing/staff-login.html');
   if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});
   if (method==='GET' && (path==='/staff/accounts' || path==='/sharing/staff-accounts.js')) {
-    if ((await requireStaff()).role!=='administrator') fail(403,'Administrator access required.');
+    const account=await staff();
+    if (!account && path==='/staff/accounts') return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
+    if (!account) fail(401,'Staff sign-in required.');
+    if (account.role!=='administrator') fail(403,'Administrator access required.');
     return asset(path==='/staff/accounts'?'/sharing/staff-accounts.html':path);
   }
   if (method==='GET' && ['/staff/editor/','/staff/editor/index.html'].includes(path) && !await staff()) {

@@ -371,5 +371,6 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     const paired = !!room().links[selected].pairId;
     modify((active, tour) => { removeConnection(tour, active, selected); selected = null; }, paired ? 'Connection deleted from both rooms.' : 'Doorway arrow deleted.');
   });
+  $('edit-tour').disabled = false;
   return { get editing() { return mode === 'edit'; }, roomChanged, selectDoor };
 }

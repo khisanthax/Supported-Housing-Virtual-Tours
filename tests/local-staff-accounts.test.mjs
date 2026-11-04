@@ -110,6 +110,10 @@ test('local staff accounts use private password operations and revoke sessions o
 
   assert.equal((await create('')).status, 401);
   assert.equal((await request(accounts)).status, 401);
+  const signedOutPage = await request('/staff/accounts');
+  assert.equal(signedOutPage.status, 303);
+  assert.equal(signedOutPage.headers.get('Location'), '/staff');
+  assert.equal((await request('/sharing/staff-accounts.js')).status, 401);
   assert.equal((await worker.fetch(new Request('https://staff-password.internal/verify', { method: 'POST' }), env)).status, 403);
   assert.equal((await signIn('admin', adminPassword, { requestOrigin: 'https://example.test' })).status, 403);
   delete env.STAFF_ACCOUNTS;
@@ -147,6 +151,7 @@ test('local staff accounts use private password operations and revoke sessions o
   assert.equal((await request(dashboard, { cookie: firstEditor })).status, 200);
   assert.equal((await request(dashboard, { cookie: secondEditor })).status, 200);
   assert.equal((await request(accounts, { cookie: firstEditor })).status, 403);
+  assert.equal((await request('/staff/accounts', { cookie: firstEditor })).status, 403);
   assert.equal((await create(firstEditor, 'blocked-editor')).status, 403);
   assert.equal((await change(firstEditor, 'disable')).status, 403);
   assert.equal((await change(admin, 'reset', { password: 'too short' })).status, 400);
@@ -159,8 +164,22 @@ test('local staff accounts use private password operations and revoke sessions o
   }
   assert.equal((await signIn('staff-editor', editorPassword)).status, 401);
   const replacement = session(await signIn('staff-editor', replacementPassword));
+  const tour = JSON.parse(await readFile(new URL('../cloudflare/sample.json', import.meta.url), 'utf8'));
+  const photos = Object.fromEntries(tour.rooms.map((room, index) => [room.id, String(index + 1).repeat(32)]));
+  for (const photo of Object.values(photos)) database.prepare('INSERT INTO photos (id,bytes,ready) VALUES (?,1,1)').run(photo);
+  const saveDraft = (cookie, body) => request('/api/staff/apartments', { method: 'POST', cookie, body });
+  const created = await saveDraft(replacement, { tour, photos });
+  assert.equal(created.status, 201);
+  const { id: apartment, version } = await created.json();
+  const edit = { tour: { ...tour, title: 'Synthetic Editor revision' }, photos, replacement: apartment, expectedVersion: version };
+  const saved = await saveDraft(replacement, edit);
+  assert.equal(saved.status, 201);
+  const { revision, tour: storedTour } = await (await request('/api/staff/drafts/' + apartment, { cookie: admin })).json();
+  assert.equal(storedTour.title, edit.tour.title);
+  assert.equal(revision, version + 1);
   assert.equal((await change(admin, 'disable')).status, 200);
   assert.equal((await request(dashboard, { cookie: replacement })).status, 401);
+  assert.equal((await saveDraft(replacement, { ...edit, expectedVersion: revision })).status, 401);
   assert.equal((await signIn('staff-editor', replacementPassword)).status, 401);
   assert.equal((await change(admin, 'enable')).status, 200);
   assert.equal((await request(dashboard, { cookie: replacement })).status, 401);
