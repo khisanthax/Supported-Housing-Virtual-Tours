@@ -52,11 +52,14 @@ async function fixture(t) {
     STAFF_ACCOUNTS: '1', STAFF_AUTH_MODE: 'password'
   };
   const delegated = [];
+  const passwordWork = [];
   const actors = new Map();
   const binding = { getByName(name) {
     if (!actors.has(name)) actors.set(name, new StaffLogin(null, env));
     return { fetch(request) {
-      delegated.push(`${request.method} ${new URL(request.url).pathname}`);
+      const target = new URL(request.url);
+      if (target.origin === origin) delegated.push(`${request.method} ${target.pathname}`);
+      else passwordWork.push(target.pathname);
       return actors.get(name).fetch(request);
     } };
   } };
@@ -76,7 +79,7 @@ async function fixture(t) {
   }), env);
   const signIn = (username, password, { ip = username, ...options } = {}) =>
     request('/api/staff/sign-in', { method: 'POST', body: { username, password }, ip, ...options });
-  return { database, env, binding, outbound, delegated, request, signIn };
+  return { database, env, binding, outbound, delegated, passwordWork, request, signIn };
 }
 
 function session(response) {
@@ -93,7 +96,7 @@ function session(response) {
 }
 
 test('local staff accounts use private password operations and revoke sessions on reset, disable, expiry and logout', async t => {
-  const { database, env, binding, outbound, delegated, request, signIn } = await fixture(t);
+  const { database, env, binding, outbound, delegated, passwordWork, request, signIn } = await fixture(t);
   const verifier = await hashStaffPassword(adminPassword);
   database.prepare('INSERT INTO staff_accounts (username, password_verifier, role) VALUES (?, ?, ?)')
     .run('admin', verifier, 'administrator');
@@ -107,6 +110,7 @@ test('local staff accounts use private password operations and revoke sessions o
 
   assert.equal((await create('')).status, 401);
   assert.equal((await request(accounts)).status, 401);
+  assert.equal((await worker.fetch(new Request('https://staff-password.internal/verify', { method: 'POST' }), env)).status, 403);
   assert.equal((await signIn('admin', adminPassword, { requestOrigin: 'https://example.test' })).status, 403);
   delete env.STAFF_ACCOUNTS;
   env.STAFF_RANDOM_HASH = digest(adminPassword);
@@ -118,9 +122,11 @@ test('local staff accounts use private password operations and revoke sessions o
   env.STAFF_LOGIN = binding;
   const admin = session(await signIn('ADMIN', adminPassword));
   assert.equal(delegated.at(-1), 'POST /api/staff/sign-in');
+  assert.equal(passwordWork.at(-1), '/verify');
   assert.equal((await create(admin, 'staff-editor', 'too short')).status, 400);
   assert.equal((await create(admin)).status, 201);
   assert.equal(delegated.at(-1), 'POST /api/staff/accounts');
+  assert.equal(passwordWork.at(-1), '/hash');
   assert.equal((await create(admin, 'STAFF-EDITOR', replacementPassword)).status, 409);
   const list = await request(accounts, { cookie: admin });
   assert.equal(list.status, 200);

@@ -77,8 +77,33 @@ async function json(request,max=131072) {
   } catch { fail(400,'Invalid JSON.'); }
 }
 
+const passwordWorkOrigin='https://staff-password.internal';
+async function passwordWork(request) {
+  const path=new URL(request.url).pathname;
+  if (request.method!=='POST' || !['/hash','/verify'].includes(path)) return output({error:'Not found.'},404);
+  const {password,verifier}=await json(request,2048);
+  if (path==='/hash') return output({verifier:hashStaffPassword(password)});
+  return output({valid:verifyStaffPassword(password,verifier)});
+}
+
+async function derivePassword(env,url,operation,data) {
+  const target=new URL('/'+operation,passwordWorkOrigin);
+  const label=url.searchParams.get('acceptance');
+  if (label && /^local-kdf-[a-z0-9:-]{1,80}$/.test(label)) target.searchParams.set('acceptance',label);
+  const response=await env.STAFF_LOGIN.getByName('password-hash-v1').fetch(new Request(target,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)
+  }));
+  if (!response.ok) fail(503,'Staff password service is temporarily unavailable.');
+  return response.json();
+}
+
 async function handleRequest(request,env,privateStaffOnly=false) {
-  try { return await route(request,env,privateStaffOnly); }
+  try {
+    if (privateStaffOnly && env.STAFF_AUTH_MODE==='password' && new URL(request.url).origin===passwordWorkOrigin) {
+      return await passwordWork(request);
+    }
+    return await route(request,env,privateStaffOnly);
+  }
   catch (error) {
     if (!error.status) console.error('Prototype request failed:',error.message);
     return output({error:error.status ? error.message : 'The prototype could not complete this request.'},error.status || 500);
@@ -123,9 +148,7 @@ async function route(request,env,privateStaffOnly) {
     }
     const forwarded=new Request(request);
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    // D1 owns all counters and credentials, so a fixed pool can spread simultaneous derivations.
-    const actorName=passwordAccounts?'password-credentials-v3-'+(namedLogin?randomInt(4):0):'staff-login';
-    return env.STAFF_LOGIN.getByName(actorName).fetch(forwarded);
+    return env.STAFF_LOGIN.getByName(passwordAccounts?'password-credentials-v4':'staff-login').fetch(forwarded);
   }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
@@ -252,7 +275,8 @@ async function route(request,env,privateStaffOnly) {
       const account=results[limits.length].results[0];
       let expires;
       if (passwordAccounts) {
-        if (!verifyStaffPassword(input.password,account?.password_verifier) || !account || account.disabled) fail(401,'Sign-in failed.');
+        const {valid}=await derivePassword(env,url,'verify',{password:input.password,verifier:account?.password_verifier});
+        if (!valid || !account || account.disabled) fail(401,'Sign-in failed.');
         expires=Date.now()+hour;
       } else {
         if (!account || account.disabled) fail(401,'Sign-in failed.');
@@ -320,9 +344,10 @@ async function route(request,env,privateStaffOnly) {
         let result;
         if (passwordAccounts) {
           if (!validNewStaffPassword(password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
+          const {verifier}=await derivePassword(env,url,'hash',{password});
           result=await run(`INSERT INTO staff_accounts(username,password_verifier,role)
             SELECT ?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,
-            username,hashStaffPassword(password),role,...administratorSession());
+            username,verifier,role,...administratorSession());
         } else {
           if (typeof firebaseUid!=='string' || !firebaseUidPattern.test(firebaseUid) ||
             typeof email!=='string' || !emailPattern.test(email)) fail(400,'Enter a Firebase user UID and email.');
@@ -342,8 +367,9 @@ async function route(request,env,privateStaffOnly) {
         if (!target) fail(404,'Staff account not found.');
         if (reset && passwordAccounts) {
           if (!validNewStaffPassword(input.password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
+          const {verifier}=await derivePassword(env,url,'hash',{password:input.password});
           const result=await run(`UPDATE staff_accounts SET password_verifier=?,revision=revision+1
-            WHERE username=? AND ${administratorGuard}`,hashStaffPassword(input.password),username,...administratorSession());
+            WHERE username=? AND ${administratorGuard}`,verifier,username,...administratorSession());
           if (!result.meta.changes) fail(409,'Account or administrator session changed.');
           return output({ok:true});
         }
