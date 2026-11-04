@@ -7,5 +7,7 @@
   "observability": { "logs": { "enabled": true, "invocation_logs": true, "head_sampling_rate": 1 } },
   "assets": { "directory": "./generated", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none" },
   "kv_namespaces": [{ "binding": "PHOTOS", "id": "00000000000000000000000000000001" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "housing-tour-local", "database_id": "00000000-0000-0000-0000-000000000001" }]
+  "d1_databases": [{ "binding": "DB", "database_name": "housing-tour-local", "database_id": "00000000-0000-0000-0000-000000000001" }],
+  "durable_objects": { "bindings": [{ "name": "STAFF_LOGIN", "class_name": "StaffLogin" }] },
+  "migrations": [{ "tag": "staff-login-v1", "new_sqlite_classes": ["StaffLogin"] }]
 }

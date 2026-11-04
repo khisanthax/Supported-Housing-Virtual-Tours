@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
-import worker from '../cloudflare/worker.mjs';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import worker, { StaffLogin } from '../cloudflare/worker.mjs';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 
 test('individual accounts enforce roles, reset and disable immediately, and expire sessions', async t => {
   const database = new DatabaseSync(':memory:');
@@ -15,7 +15,10 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
         return { bind: (...args) => ({
           first: async () => database.prepare(sql).get(...args),
           all: async () => ({ results: database.prepare(sql).all(...args) }),
-          run: async () => ({ meta: database.prepare(sql).run(...args) })
+          run: async () => {
+            const statement = database.prepare(sql);
+            return statement.columns().length ? { results: statement.all(...args) } : { meta: statement.run(...args) };
+          }
         }) };
       },
       async batch(statements) {
@@ -38,7 +41,7 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     const key = { ...publicKey.export({ format: 'jwk' }), kid: 'fixture-key' };
     const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
     const passwords = new Map([['admin@example.test', password], ['editor@example.test', password]]);
-    let resetEmail, badSignature = false;
+    let resetEmail, lastIdToken, badSignature = false;
     t.mock.method(globalThis, 'fetch', async (url, options) => {
       if (url.startsWith('https://www.googleapis.com/')) return Response.json({ keys: [key] });
       const input = JSON.parse(options.body);
@@ -54,12 +57,14 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
         sub: input.email.split('@')[0], exp: now + 3600, iat: now, auth_time: now, firebase: { sign_in_provider: 'password' } });
       const content = head + '.' + body;
       const signature = sign('sha256', Buffer.from(badSignature ? content + 'tampered' : content), privateKey);
-      return Response.json({ idToken: content + '.' + signature.toString('base64url') });
+      lastIdToken = content + '.' + signature.toString('base64url');
+      return Response.json({ idToken: lastIdToken });
     });
     database.exec("INSERT INTO firebase_staff_accounts(username,firebase_uid,email,role) VALUES('admin','admin','admin@example.test','administrator')");
-    const request = (path, { method = 'GET', cookie = '', body, ip = 'test' } = {}) =>
+    const request = (path, { method = 'GET', cookie = '', body, ip = 'test', forwardedClient = '' } = {}) =>
       worker.fetch(new Request(origin + '/api/staff/' + path, {
-        method, headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
+        method, headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json',
+          'CF-Connecting-IP': ip, 'X-Staff-Login-Client': forwardedClient },
         body: body === undefined ? undefined : JSON.stringify(body)
       }), env);
     const signIn = (username, value = password, ip = username) => request('sign-in', {
@@ -68,10 +73,39 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     const session = response => response.headers.get('Set-Cookie').split(';')[0];
     assert.equal((await request('accounts')).status, 401);
     assert.equal((await signIn('admin', 'Invalid synthetic password')).status, 401);
+    env.STAFF_LOGIN_BACKEND = 'durable-object';
+    assert.equal((await signIn('admin')).status, 503);
+    const staffLogin = new StaffLogin(null, env);
+    let delegated = 0;
+    let dashboards = 0;
+    env.STAFF_LOGIN = { getByName(name) {
+      if (name === 'staff-dashboard') {
+        return { fetch(request) { dashboards++; return staffLogin.fetch(request); } };
+      }
+      assert.equal(name, 'staff-login');
+      return { fetch(request) { delegated++; return staffLogin.fetch(request); } };
+    } };
+    const foreignLogin = await worker.fetch(new Request(origin + '/api/staff/sign-in', {
+      method: 'POST', headers: { Origin: 'https://example.test' }
+    }), env);
+    assert.equal(foreignLogin.status, 403);
+    assert.equal(delegated, 0);
+    assert.equal((await staffLogin.fetch(new Request(origin + '/api/staff/accounts'))).status, 404);
     badSignature = true;
     assert.equal((await signIn('admin')).status, 401);
     badSignature = false;
     const admin = session(await signIn('ADMIN'));
+    assert.equal(delegated, 2);
+    assert.match(admin, /^kv_firebase_staff=[A-Za-z0-9_-]{43}$/);
+    const storedExpiry = database.prepare('SELECT expires FROM firebase_staff_sessions').get().expires;
+    const claims = JSON.parse(Buffer.from(lastIdToken.split('.')[1], 'base64url'));
+    assert.equal(storedExpiry, claims.exp * 1000);
+    const legacyToken = 'a'.repeat(43) + '~' + lastIdToken;
+    database.prepare('INSERT INTO firebase_staff_sessions VALUES(?,?,?,?)')
+      .run(createHash('sha256').update(legacyToken).digest('hex'), 'admin', 1, storedExpiry);
+    assert.equal((await request('dashboard', { cookie: 'kv_firebase_staff=' + legacyToken })).status, 200);
+    assert.equal(dashboards, 1);
+    assert.equal((await request('dashboard', { cookie: 'kv_guest='+'a'.repeat(43) })).status, 401);
     const independentAdmin = session(await signIn('admin'));
     assert.notEqual(admin, independentAdmin);
     const accountList = await request('accounts', { cookie: admin });
@@ -108,8 +142,12 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
     assert.equal((await request('dashboard', { cookie: independentAdmin })).status, 200);
     database.prepare('UPDATE firebase_staff_sessions SET expires=0').run();
     assert.equal((await request('dashboard', { cookie: admin })).status, 401);
-    for (let attempt = 0; attempt < 8; attempt++) assert.equal((await signIn('missing', '', 'rate')).status, 401);
-    assert.equal((await signIn('missing', '', 'rate')).status, 429);
+    for (let attempt = 0; attempt <= 8; attempt++) {
+      assert.equal((await request('sign-in', {
+        method: 'POST', body: { username: 'missing-' + attempt, password }, ip: 'rate',
+        forwardedClient: 'spoofed-' + attempt
+      })).status, attempt < 8 ? 401 : 429);
+    }
   } finally {
     database.close();
   }

@@ -4,6 +4,8 @@ Open /staff on your approved pilot URL. Direct links to the editor also open sta
 
 ## Initial administrator
 
+In password mode, sign in at **/staff** with your username and password. An Administrator uses **Manage staff accounts** to create users, set or reset their passwords, and disable access. Staff Editors can edit tours and manage guest sharing without access to account administration. Use a separate password for each staff member and share initial or reset passwords privately. A reset or disable ends that account's active sessions. See the [deployment guide](DEPLOYMENT.md) for initial bootstrap.
+
 For a pilot configured with Firebase, use **Username** and **Password** on the staff sign-in page. An administrator creates Firebase users and links them to a role in the staff workspace. Use **Manage staff accounts** to send a reset email or disable app access. See the [deployment guide](DEPLOYMENT.md) for bootstrap and acceptance checks.
 
 For the shared pilot configuration:

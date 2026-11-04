@@ -34,3 +34,18 @@ CREATE TABLE IF NOT EXISTS firebase_staff_sessions(
 );
 CREATE INDEX IF NOT EXISTS firebase_staff_sessions_expiry ON firebase_staff_sessions(expires);
 CREATE INDEX IF NOT EXISTS firebase_staff_sessions_account ON firebase_staff_sessions(username);
+
+CREATE TABLE IF NOT EXISTS staff_accounts(
+  username TEXT PRIMARY KEY,
+  password_verifier TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('administrator','editor')),
+  disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+  revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS staff_sessions(
+  token TEXT PRIMARY KEY,
+  username TEXT NOT NULL REFERENCES staff_accounts(username),
+  revision INTEGER NOT NULL,
+  expires INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS staff_sessions_expiry ON staff_sessions(expires);
