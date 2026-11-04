@@ -118,11 +118,12 @@ async function route(request,env,privateStaffOnly) {
   if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
     if (staffDashboard || accountList) {
-      return env.STAFF_LOGIN.getByName(passwordAccounts?'password-dashboard-v1':'staff-dashboard').fetch(request);
+      // A fresh instance avoids dispatching an added route to an actor still running older code.
+      return env.STAFF_LOGIN.getByName(passwordAccounts?'password-dashboard-v2':'staff-dashboard').fetch(request);
     }
     const forwarded=new Request(request);
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    return env.STAFF_LOGIN.getByName(passwordAccounts?'password-credentials-v1':'staff-login').fetch(forwarded);
+    return env.STAFF_LOGIN.getByName(passwordAccounts?'password-credentials-v2':'staff-login').fetch(forwarded);
   }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
