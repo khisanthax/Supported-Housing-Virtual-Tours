@@ -15,7 +15,10 @@ test('individual accounts enforce roles, reset and disable immediately, and expi
         return { bind: (...args) => ({
           first: async () => database.prepare(sql).get(...args),
           all: async () => ({ results: database.prepare(sql).all(...args) }),
-          run: async () => ({ meta: database.prepare(sql).run(...args) })
+          run: async () => {
+            const statement = database.prepare(sql);
+            return statement.columns().length ? { results: statement.all(...args) } : { meta: statement.run(...args) };
+          }
         }) };
       },
       async batch(statements) {

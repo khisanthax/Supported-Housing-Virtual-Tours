@@ -134,12 +134,13 @@ async function route(request,env) {
     'SELECT * FROM versions WHERE apartment=?'+(published?' AND available<=?':'')+' ORDER BY seq DESC LIMIT 1',
     ...[apartment,...(published?[now]:[])]
   );
+  const minute=Math.floor(now/60000);
+  const client=request.headers.get('CF-Connecting-IP') || 'local';
+  const attemptSql=`INSERT INTO attempts VALUES(?,1) ON CONFLICT(bucket)
+    DO UPDATE SET count=count+1 WHERE count<8 RETURNING count`;
+  const attemptBucket=(scope,identity=client)=>minute+':'+hash(scope+':'+identity);
   async function throttle(scope, identity) {
-    const minute=Math.floor(now/60000);
-    const client=request.headers.get('CF-Connecting-IP') || 'local';
-    const bucket=minute+':'+hash(scope+':'+(identity ?? client));
-    const count=await one(`INSERT INTO attempts VALUES(?,1) ON CONFLICT(bucket)
-      DO UPDATE SET count=count+1 WHERE count<8 RETURNING count`,bucket);
+    const count=await one(attemptSql,attemptBucket(scope,identity));
     if (!count) fail(429,'Too many attempts. Try again in a minute.');
     if (!identity) await run('DELETE FROM attempts WHERE bucket<?',String(minute-2)+':');
   }
@@ -182,14 +183,22 @@ async function route(request,env) {
     return asset(path);
   }
   if (method==='POST' && path==='/api/staff/sign-in') {
-    await throttle('staff');
     if (individualAccounts) {
       const input=await json(request);
       const username=normalizeUsername(input.username);
       if (!firebaseReady) fail(503,'Staff sign-in has not been configured.');
-      if (!usernamePattern.test(username) || !validPass(input.password,1)) fail(401,'Sign-in failed.');
-      await throttle('staff-account',username);
-      const account=await one('SELECT firebase_uid,email,disabled,revision FROM firebase_staff_accounts WHERE username=?',username);
+      if (!usernamePattern.test(username) || !validPass(input.password,1)) {
+        await throttle('staff');
+        fail(401,'Sign-in failed.');
+      }
+      const [ipLimit,usernameLimit,lookup]=await db.batch([
+        stmt(attemptSql,attemptBucket('staff')),
+        stmt(attemptSql.replace('VALUES(?,1)','SELECT ?,1 WHERE changes()>0'),attemptBucket('staff-account',username)),
+        stmt('SELECT firebase_uid,email,disabled,revision FROM firebase_staff_accounts WHERE username=?',username),
+        stmt('DELETE FROM attempts WHERE bucket<?',String(minute-2)+':')
+      ]);
+      if (!ipLimit.results.length || !usernameLimit.results.length) fail(429,'Too many attempts. Try again in a minute.');
+      const account=lookup.results[0];
       if (!account || account.disabled) fail(401,'Sign-in failed.');
       const response=await firebaseRequest(env.FIREBASE_AUTH_API_KEY,'signInWithPassword',{
         email:account.email,password:input.password,returnSecureToken:true
@@ -209,6 +218,7 @@ async function route(request,env) {
       if (!result[1].meta.changes) fail(401,'Sign-in failed.');
       return output({ok:true},200,setCookie('kv_firebase_staff',token,Math.floor((expires-Date.now())/1000),url.protocol==='https:'));
     }
+    await throttle('staff');
     if (!keyPattern.test(env.STAFF_RANDOM_HASH ?? '')) fail(503,'Staff sign-in has not been configured.');
     const {passphrase}=await json(request);
     if (!validPass(passphrase,16)) fail(401,'Sign-in failed.');
