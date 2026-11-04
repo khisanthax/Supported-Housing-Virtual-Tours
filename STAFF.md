@@ -47,3 +47,9 @@ See LOGBOOK.md for verification history and outstanding checks.
 Use **Archive** to withdraw a tour from guests and offline downloads while keeping the latest draft and its backup available to staff. **Restore as draft** keeps the apartment unpublished until staff explicitly publish again. Use the room order buttons to change the sequence without moving arrows or changing the start room.
 
 Open **Available Offline** while signed in to download selected tours to this device. Set a separate local vault passphrase and save only tours needed on the device. Reopen the installed app while disconnected and unlock the vault to view saved tours. A downloaded copy expires 24 hours after download. Online checks can detect archives, changes and expired staff sessions. A disconnected device cannot receive a remote revocation. Sign out while online to clear the local vault. The browser or operating system can reclaim local storage, so keep a separate backup.
+
+## Capacity and troubleshooting
+
+The pilot reserves up to 400 MB of JPEG data, including current drafts, published revisions and uploads awaiting cleanup. For 175 panoramas, aim for 1.5 MiB per image on average to leave room for editing and retained versions. The individual 4 MiB upload limit can be used for a few larger images. If an image upload is interrupted, retry from the review screen. If the storage ceiling is reached, export any needed backups, then use **Clean up unused storage** before retrying. Cleanup retains active versions and gives unreferenced uploads a grace period.
+
+For **Photo is still preparing**, allow the new KV revision to propagate and try again. If an editor reports that a draft changed, reopen the latest draft before continuing. If a guest sees an access error, confirm the share is active and the intended apartments are published. If the browser reports that offline storage is incomplete, reconnect, sign in, and download the tour again.
