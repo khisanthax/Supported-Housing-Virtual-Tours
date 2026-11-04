@@ -1,0 +1,5 @@
+# Development log
+
+- 2026-11-03. Prior Site commits 9878f50, c5e9c02 and 4a3be23 recorded the standalone viewer and browser-local editor. Project reports recorded portable tour backups, a Node sharing and offline prototype, and a Cloudflare D1/KV pilot. Reports cite live guest unlocks below 10 ms in sampled requests. The pilot used a shared high-entropy staff passphrase. These are historical observations.
+- 2026-11-04. Published the six-viewpoint synthetic Sites demo with five reciprocal connections. The Cloudflare pilot work added ZIP import review, shared drafts, publishing controls and guest phrase rotation. Historical pilot reports record browser checks and note unverified physical Android and account-wide usage. This migration starts a clean public history, with deployment configuration, workspace artifacts and sensitive files excluded.
+- Pending. Individual staff accounts, account administration, archive and restore, Worker offline integration, 25-apartment capacity verification, and full browser and device acceptance.

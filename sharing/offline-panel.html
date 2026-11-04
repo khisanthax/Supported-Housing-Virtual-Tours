@@ -1,0 +1,23 @@
+<section id="offline-panel" aria-labelledby="offline-heading">
+  <h1 id="offline-heading">Available Offline</h1>
+  <p id="offline-connection" role="status">Checking connection…</p>
+  <p id="offline-message" role="status"></p>
+  <p><a href="/staff">Staff dashboard</a> <button id="offline-install" hidden>Install app</button></p>
+  <form id="offline-unlock" hidden>
+    <label>Device passphrase <input id="offline-pass" type="password" minlength="16" maxlength="256" required autocomplete="off"></label>
+    <button id="offline-unlock-button">Unlock downloads</button>
+    <p>Use a separate passphrase of at least 16 characters. It cannot be recovered. Signing out from the staff dashboard clears downloads on this browser.</p>
+  </form>
+  <div id="offline-library" hidden>
+    <button id="offline-lock">Lock downloads</button>
+    <button id="offline-storage">Request persistent storage</button>
+    <p id="offline-used"></p>
+    <form id="offline-download" hidden>
+      <fieldset><legend>Select apartments to download or update</legend><div id="offline-choices"></div></fieldset>
+      <button>Download selected</button>
+    </form>
+    <progress id="offline-progress" max="1" value="0" hidden aria-label="Download progress"></progress>
+    <button id="offline-cancel" hidden>Cancel download</button>
+    <ul id="offline-saved"></ul>
+  </div>
+</section>

@@ -1,0 +1,146 @@
+{
+  "id": "two-bedroom-test-apartment",
+  "title": "Two-Bedroom Apartment",
+  "subtitle": "Supported Housing · Sample walkthrough",
+  "startRoom": "living",
+  "rooms": [
+    {
+      "id": "living",
+      "name": "Living room",
+      "description": "Look for the kitchen and hallway arrows on either side of the room.",
+      "image": "images/living.jpg",
+      "initialView": {
+        "yaw": 1.97,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "kitchen",
+          "yaw": -2.3903,
+          "pitch": 0.2459,
+          "pairId": "door-1"
+        },
+        {
+          "target": "hallway",
+          "yaw": 2.5543,
+          "pitch": 0.3278,
+          "pairId": "door-2"
+        }
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen and dining",
+      "description": "Explore the kitchen and dining area, then return through the wide opening.",
+      "image": "images/kitchen.jpg",
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "living",
+          "yaw": -2.4996,
+          "pitch": 0.2868,
+          "pairId": "door-1"
+        }
+      ]
+    },
+    {
+      "id": "hallway",
+      "name": "Hallway",
+      "description": "The bathroom and both bedrooms branch off the hallway.",
+      "image": "images/hallway.jpg",
+      "initialView": {
+        "yaw": 0.8,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "living",
+          "yaw": -2.445,
+          "pitch": 0.3551,
+          "pairId": "door-2"
+        },
+        {
+          "target": "primary-bedroom",
+          "yaw": 0,
+          "pitch": 0.1776,
+          "pairId": "door-3"
+        },
+        {
+          "target": "second-bedroom",
+          "yaw": 2.5543,
+          "pitch": 0.3961,
+          "pairId": "door-4"
+        },
+        {
+          "target": "bathroom",
+          "yaw": 1.2157,
+          "pitch": 0.3551,
+          "pairId": "door-5"
+        }
+      ]
+    },
+    {
+      "id": "primary-bedroom",
+      "name": "Primary bedroom",
+      "description": "Use the open door to go back to the hallway.",
+      "image": "images/primary-bedroom.jpg",
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "hallway",
+          "yaw": -2.4723,
+          "pitch": 0.3142,
+          "pairId": "door-3"
+        }
+      ]
+    },
+    {
+      "id": "second-bedroom",
+      "name": "Second bedroom",
+      "description": "Use the open door to go back to the hallway.",
+      "image": "images/second-bedroom.jpg",
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "hallway",
+          "yaw": 2.363,
+          "pitch": 0.3278,
+          "pairId": "door-4"
+        }
+      ]
+    },
+    {
+      "id": "bathroom",
+      "name": "Bathroom",
+      "description": "Follow the arrow through the door to return to the hallway.",
+      "image": "images/bathroom.jpg",
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0.08,
+        "fov": 1.45
+      },
+      "links": [
+        {
+          "target": "hallway",
+          "yaw": -2.2811,
+          "pitch": 0.3688,
+          "pairId": "door-5"
+        }
+      ]
+    }
+  ]
+}

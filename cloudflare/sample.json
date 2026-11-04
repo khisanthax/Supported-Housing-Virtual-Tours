@@ -1,0 +1,11 @@
+{
+  "id": "demo-apartment",
+  "title": "The Willow Apartment",
+  "subtitle": "Supported Housing · Sample walkthrough",
+  "startRoom": "living",
+  "rooms": [
+    { "id": "living", "name": "Living room", "description": "A place to settle in, spend time together, and feel at home.", "image": "images/living.jpg", "initialView": { "yaw": 0, "pitch": 0, "fov": 1.45 }, "links": [{ "target": "kitchen", "yaw": 0.55, "pitch": 0.04, "pairId": "door-1" }] },
+    { "id": "kitchen", "name": "Kitchen", "description": "Explore the kitchen, then continue through to the bedroom.", "image": "images/kitchen.jpg", "initialView": { "yaw": 0, "pitch": 0, "fov": 1.45 }, "links": [{ "target": "living", "yaw": -0.55, "pitch": 0.04, "pairId": "door-1" }, { "target": "bedroom", "yaw": 0.55, "pitch": 0.04, "pairId": "door-2" }] },
+    { "id": "bedroom", "name": "Bedroom", "description": "A quiet space to rest. Follow the doorway back to the kitchen.", "image": "images/bedroom.jpg", "initialView": { "yaw": 0, "pitch": 0, "fov": 1.45 }, "links": [{ "target": "kitchen", "yaw": -0.55, "pitch": 0.04, "pairId": "door-2" }] }
+  ]
+}

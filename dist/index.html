@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#183e36">
+  <meta name="description" content="Explore a six-room sample apartment in an interactive 360 degree walkthrough.">
+  <title>Two-Bedroom Apartment · 360° walkthrough</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="editor.css">
+  <script defer src="vendor/marzipano.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="./" aria-label="Supported Housing walkthrough home"><span class="brand-mark" aria-hidden="true">⌂</span><span>SUPPORTED<br><b>HOUSING</b></span></a>
+    <span class="header-note">A space to call home</span>
+    <span class="demo-tag"><span aria-hidden="true">●</span> Sample apartment</span>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="apartment-title">
+      <div><p class="eyebrow">COME ON IN</p><h1 id="apartment-title">Two-Bedroom Apartment</h1><p class="intro-copy">Take a look around, at your own pace.</p></div>
+      <div class="tour-meta"><span class="round-icon" aria-hidden="true">↻</span><div><strong>360° walkthrough</strong><span>3 connected rooms · Explore freely</span></div></div>
+    </section>
+    <section class="editor-bar" aria-label="Tour editing">
+      <button id="edit-tour" class="edit-button">Edit Tour</button>
+      <button id="preview-tour" class="edit-button" hidden>Preview as visitor</button>
+      <button id="exit-editor" class="edit-button secondary" hidden>Return to sample</button>
+      <button id="place-return" class="edit-button" hidden>Position return arrow</button>
+      <span id="editor-status" role="status"></span>
+    </section>
+    <section id="tour" class="tour" aria-label="Interactive apartment walkthrough">
+      <div id="pano" tabindex="0" role="region" aria-label="360 degree room view. Drag to look around, pinch or scroll to zoom. Use arrow keys to look around." aria-describedby="viewer-help"></div>
+      <div class="scene-heading"><span class="live-dot" aria-hidden="true"></span><span id="scene-name">Living room</span><span class="scene-degree">360°</span></div>
+      <div class="viewer-actions"><button id="reset-view" class="glass-button" title="Reset view" aria-label="Reset view">↻</button><button id="fullscreen" class="glass-button" title="Fullscreen" aria-label="Enter fullscreen">⛶</button></div>
+      <div id="loading" class="loading" role="status">Opening the room…</div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div class="viewer-bottom"><span id="viewer-help" class="gesture-hint"><span aria-hidden="true">↔</span> Drag to look around <span class="hint-divider">·</span> Pinch or scroll to zoom</span><span class="synthetic-badge">ILLUSTRATIVE DEMO</span></div>
+      <div class="zoom-controls"><button id="zoom-in" class="glass-button" aria-label="Zoom in">+</button><button id="zoom-out" class="glass-button" aria-label="Zoom out">−</button></div>
+      <button id="place-on-pano" class="place-on-pano" hidden aria-label="Tap a doorway or press Enter to place at the center"><span>Tap a doorway to position the arrow</span><b aria-hidden="true">＋</b></button>
+      <button id="cancel-on-pano" class="edit-button secondary cancel-on-pano" hidden>Cancel placement</button>
+    </section>
+    <section class="room-strip" aria-label="Choose a room">
+      <div class="room-strip-label"><p class="eyebrow">EXPLORE THE APARTMENT</p><span>Choose a room or follow a doorway.</span></div>
+      <div id="room-tabs" class="room-tabs" role="group" aria-label="Rooms"></div>
+      <div class="step-controls"><button id="previous" aria-label="Previous room">←</button><span id="room-count">01 / 03</span><button id="next" aria-label="Next room">→</button></div>
+    </section>
+    <section id="editor-panel" class="editor-panel" aria-labelledby="editor-title" hidden>
+      <div class="editor-heading"><div><p class="eyebrow">STAFF WORKSPACE</p><h2 id="editor-title">Edit this tour</h2></div><p>Saved in this browser. Export a backup before clearing browser data or switching devices.</p></div>
+      <fieldset id="editor-fields" class="editor-fields">
+        <div class="editor-card">
+          <h3>Apartment and files</h3>
+          <form id="tour-title-form"><label>Apartment title<input id="draft-title" required maxlength="120"></label><button class="edit-button secondary">Save title</button></form>
+          <div class="edit-actions">
+            <label class="edit-button file-button">Add room JPEGs<input id="add-rooms" type="file" accept="image/jpeg,.jpg,.jpeg" multiple></label>
+            <label class="edit-button secondary file-button">Start new tour<input id="new-tour" type="file" accept="image/jpeg,.jpg,.jpeg" multiple></label>
+            <button id="export-tour" class="edit-button secondary" type="button">Export backup</button>
+            <label class="edit-button secondary file-button">Import backup<input id="import-tour" type="file" accept=".shtour,application/octet-stream"></label>
+          </div>
+          <p class="edit-help">Choose one completed, stitched 2:1 JPEG per viewpoint. Capture frames are not accepted. You’ll name each room before saving.</p>
+        </div>
+        <div class="editor-card">
+          <h3>Current room <span id="start-badge" class="start-badge" hidden>Start room</span></h3>
+          <form id="room-name-form"><label>Room name<input id="draft-room-name" required maxlength="80"></label><button class="edit-button secondary">Save name</button></form>
+          <div class="edit-actions">
+            <label class="edit-button secondary file-button">Replace photo<input id="replace-photo" type="file" accept="image/jpeg,.jpg,.jpeg"></label>
+            <button id="set-start" class="edit-button secondary" type="button">Make start room</button>
+            <button id="set-view" class="edit-button secondary" type="button">Save starting view</button>
+            <button id="delete-room" class="edit-button danger" type="button">Delete room</button>
+          </div>
+          <p class="edit-help">Replacing a photo keeps doorway links at the same angles. Check the arrows if the new photo faces a different way.</p>
+        </div>
+        <div class="editor-card door-editor">
+          <h3>Doorway arrows</h3>
+          <p class="edit-help">Look toward a doorway, choose Place arrow, and tap the doorway. Then pick the destination. The editor creates a return arrow for you to position in that room.</p>
+          <div class="door-controls"><label>Destination<select id="door-target"></select></label><button id="add-door" class="edit-button" type="button">Place arrow</button><button id="cancel-placement" class="edit-button secondary" type="button" hidden>Cancel placement</button></div>
+          <div id="door-list" class="door-list"></div>
+          <div id="selected-door-actions" class="edit-actions" hidden><button id="retarget-door" class="edit-button secondary" type="button">Save destination</button><button id="move-door" class="edit-button secondary" type="button">Move arrow</button><button id="delete-door" class="edit-button danger" type="button">Delete arrow</button></div>
+        </div>
+      </fieldset>
+      <p id="editor-feedback" role="status"></p>
+    </section>
+    <dialog id="name-rooms" class="name-rooms" aria-labelledby="name-rooms-title">
+      <form method="dialog">
+        <h2 id="name-rooms-title">Name your rooms</h2>
+        <p id="name-rooms-help"></p>
+        <div id="room-name-inputs"></div>
+        <div class="edit-actions"><button id="save-named-rooms" class="edit-button" value="save">Save rooms</button><button class="edit-button secondary" value="cancel" formnovalidate>Cancel</button></div>
+      </form>
+    </dialog>
+    <dialog id="choose-destination" class="name-rooms" aria-labelledby="choose-destination-title">
+      <form method="dialog">
+        <h2 id="choose-destination-title">Where does this doorway lead?</h2>
+        <label>Destination room <select id="new-door-target" required></select></label>
+        <div class="edit-actions"><button class="edit-button" value="save">Save connection</button><button class="edit-button secondary" value="cancel" formnovalidate>Cancel</button></div>
+      </form>
+    </dialog>
+    <dialog id="confirm-edit" class="name-rooms" aria-labelledby="confirm-edit-title">
+      <form method="dialog">
+        <h2 id="confirm-edit-title"></h2><p id="confirm-edit-help"></p>
+        <div class="edit-actions"><button class="edit-button secondary" value="cancel" autofocus>Cancel</button><button id="confirm-edit-action" class="edit-button danger" value="confirm"></button></div>
+      </form>
+    </dialog>
+    <section class="details"><div><p class="eyebrow" id="room-eyebrow">MAKE YOURSELF AT HOME</p><h2 id="room-title">Living room</h2><p id="room-description"></p></div><aside><span class="privacy-icon" aria-hidden="true">◇</span><div><strong>Your first look, without the rush.</strong><p>This is a synthetic sample apartment, not a real property. Room sizes, features, and accessibility are illustrative.</p></div></aside></section>
+    <details class="local-preview"><summary>Try your own 360° JPEG <span>Private, on this device</span></summary><div class="upload-content"><p>Preview an equirectangular JPEG in the current room. It stays in this browser and is never uploaded. Reload to return to the demo. Doorway arrows are hidden for your preview.</p><label class="upload-button">Choose JPEG<input id="photo-input" type="file" accept="image/jpeg,.jpg,.jpeg"></label><button id="restore-demo" class="text-button">Restore sample room</button><p id="upload-status" role="status"></p><output id="coordinates" aria-live="off"></output></div></details>
+    <footer><span>SUPPORTED HOUSING <span class="footer-divider">/</span> A welcoming first look.</span><span>Six-room sample · No real apartment photography</span></footer>
+  </main>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>
