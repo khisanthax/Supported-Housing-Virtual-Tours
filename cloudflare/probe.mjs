@@ -8,7 +8,7 @@ const staffPassphrase=process.env.PILOT_PROBE_STAFF ??
   (origin==='http://localhost:4193' ? 'Synthetic KV prototype staff only' : null);
 assert.ok(staffPassphrase,'Set PILOT_PROBE_STAFF for a remote probe');
 const call=(path,{method='GET',cookie,body,type='application/json'}={})=>fetch(origin+path,{
-  method,redirect:'manual',headers:{...(cookie?{Cookie:cookie}:{}),...(method==='GET'?{}:{Origin:origin}),...(body?{'Content-Type':type}:{})},
+  method,redirect:'manual',headers:{Connection:'close',...(cookie?{Cookie:cookie}:{}),...(method==='GET'?{}:{Origin:origin}),...(body?{'Content-Type':type}:{})},
   body:body && (type==='application/json'?JSON.stringify(body):body)
 });
 async function check(path,status,options) {
@@ -59,12 +59,12 @@ console.log('PASS upload validation, binary KV bytes, independent staff sessions
 
 async function share(apartments, options={}) {
   const result=await (await check('/api/staff/shares',201,post(staff,{apartments,expires:Date.now()+3600000,...options}))).json();
-  assert.match(result.code,/^[a-z]+(?:-[a-z]+){2}$/);
+  assert.match(result.code,options.wordCount ? /^[a-z]+(?:-[a-z]+){2}$/ : /^[A-Za-z0-9_-]{21}[AQgw]$/);
   assert.equal(result.url.includes(result.code),false);
   return result;
 }
 await check('/api/staff/shares',400,post(staff,{apartments:[a.id],passphrase:'chosen by staff',expires:Date.now()+60000}));
-const link=await share([a.id,b.id]);
+const link=await share([a.id,b.id],{wordCount:3});
 const generated=await share([a.id]);
 async function unlock(link,code=link.code,expected=200) {
   const response=await check('/api/guest/unlock',expected,post(null,{token:new URL(link.url).hash.slice(1),code}));
@@ -110,6 +110,26 @@ await check('/api/staff/apartments',409,post(staff,{tour,photos,replacement:a.id
 assert.ok((await catalog(generatedGuest)).includes(a.id));
 const published=await check(`/api/guest/tours/${a.id}/manifest`,200,{cookie:generatedGuest});
 assert.equal((await published.json()).title,'Synthetic Willow');
+const offlinePath='/api/staff/offline/'+a.id;
+await check('/offline/',200);
+await check('/offline/sw.js',200);
+await check('/api/staff/offline',401,{cookie:generatedGuest});
+const offline=(await (await check(offlinePath+'/manifest',200,{cookie:secondStaff})).json());
+assert.equal(offline.revision,'2');
+assert.equal(offline.images.length,tour.rooms.length);
+await check(offlinePath+'/images/living?revision=1',409,{cookie:secondStaff});
+await check(offlinePath+'/images/living?revision=2',200,{cookie:secondStaff});
+const changeState=action=>check('/api/staff/apartments/'+a.id,200,{
+  method:'PATCH',cookie:staff,body:{action,expectedVersion:2}
+});
+await changeState('archive');
+await check(offlinePath+'/manifest',404,{cookie:secondStaff});
+await check(`/api/guest/tours/${a.id}/manifest`,404,{cookie:generatedGuest});
+await check(`/api/staff/tours/${a.id}/manifest`,200,{cookie:staff});
+await changeState('restore');
+await check(offlinePath+'/manifest',200,{cookie:secondStaff});
+await check(`/api/guest/tours/${a.id}/manifest`,404,{cookie:generatedGuest});
+console.log('PASS staff-only offline downloads, revision checks, archive and restore as an unpublished draft');
 console.log('PASS selected tours, unauthorized alternate URLs, share edits, immediate revocation, expiry, version conflict and prior published version');
 let limited=false;
 for (let i=0;i<12;i++) {

@@ -21,3 +21,5 @@ cloudflare/.wrangler/
 cloudflare/wrangler.pilot.json
 cloudflare/cloudflare/
 .codex-attachments/
+
+**/.wrangler/

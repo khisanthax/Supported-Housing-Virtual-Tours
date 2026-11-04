@@ -17,3 +17,20 @@ CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
 CREATE TABLE IF NOT EXISTS attempts(bucket TEXT PRIMARY KEY, count INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS apartment_visibility(apartment TEXT PRIMARY KEY, state INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS photo_age(id TEXT PRIMARY KEY, created INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS firebase_staff_accounts(
+  username TEXT PRIMARY KEY,
+  firebase_uid TEXT NOT NULL UNIQUE,
+  email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  role TEXT NOT NULL CHECK(role IN ('administrator','editor')),
+  disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0,1)),
+  revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS firebase_staff_sessions(
+  token TEXT PRIMARY KEY,
+  username TEXT NOT NULL REFERENCES firebase_staff_accounts(username),
+  revision INTEGER NOT NULL,
+  expires INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS firebase_staff_sessions_expiry ON firebase_staff_sessions(expires);
+CREATE INDEX IF NOT EXISTS firebase_staff_sessions_account ON firebase_staff_sessions(username);

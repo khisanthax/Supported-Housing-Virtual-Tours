@@ -4,6 +4,10 @@ Open /staff on your approved pilot URL. Direct links to the editor also open sta
 
 ## Initial administrator
 
+For a pilot configured with Firebase, use **Username** and **Password** on the staff sign-in page. An administrator creates Firebase users and links them to a role in the staff workspace. Use **Manage staff accounts** to send a reset email or disable app access. See the [deployment guide](DEPLOYMENT.md) for bootstrap and acceptance checks.
+
+For the shared pilot configuration:
+
 The pilot uses one administrator passphrase. Cloudflare account authorization lets the account operator set or rotate its SHA-256 verifier through Wrangler. The passphrase itself is generated with 256 bits of randomness and is never stored in Cloudflare, source code, or application logs.
 
 On the Windows account used for enrollment, open PowerShell in the repository and run:
@@ -37,3 +41,9 @@ D1 stores versioned manifests, room names, arrow positions, JPEG references, vis
 Export **.shtour** from the editor or catalog to back up the latest draft and its images. Import creates or replaces a private draft. Share links, login credentials, and publication state are outside the portable package. **Clean up unused storage** prunes a bounded batch of superseded versions and deletes unreferenced JPEGs older than 24 hours. The current draft, current publication, and warming publications are retained. Run cleanup again to process another batch.
 
 See LOGBOOK.md for verification history and outstanding checks.
+
+## Archived and offline tours
+
+Use **Archive** to withdraw a tour from guests and offline downloads while keeping the latest draft and its backup available to staff. **Restore as draft** keeps the apartment unpublished until staff explicitly publish again. Use the room order buttons to change the sequence without moving arrows or changing the start room.
+
+Open **Available Offline** while signed in to download selected tours to this device. Set a separate local vault passphrase and save only tours needed on the device. Reopen the installed app while disconnected and unlock the vault to view saved tours. A downloaded copy expires 24 hours after download. Online checks can detect archives, changes and expired staff sessions. A disconnected device cannot receive a remote revocation. Sign out while online to clear the local vault. The browser or operating system can reclaim local storage, so keep a separate backup.
