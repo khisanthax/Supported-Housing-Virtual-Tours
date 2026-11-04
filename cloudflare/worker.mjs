@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import words from './phrase-words.mjs';
-import { emailPattern, firebaseRequest, firebaseUidPattern, normalizeUsername, usernamePattern, verifyFirebaseToken } from './firebase-auth.mjs';
+import { emailPattern, firebaseRequest, firebaseUidPattern, verifyFirebaseToken } from './firebase-auth.mjs';
+import { hashStaffPassword, normalizeUsername, usernamePattern, validNewStaffPassword, verifyStaffPassword } from './staff-password.mjs';
 import { inspectJpeg, MAX_ROOMS } from '../dist/tour-package.js';
 import { validateApartment } from '../dist/tour-data.js';
 
@@ -66,9 +67,9 @@ async function limitedBody(request,max) {
   }
   return new Blob(parts);
 }
-async function json(request) {
+async function json(request,max=131072) {
   if (request.headers.get('Content-Type')?.split(';')[0]!=='application/json') fail(415,'Send JSON.');
-  const blob=await limitedBody(request,131072);
+  const blob=await limitedBody(request,max);
   try {
     const value=JSON.parse(await blob.text());
     if (!value || Array.isArray(value) || typeof value!=='object') throw new Error();
@@ -107,15 +108,20 @@ async function route(request,env,privateStaffOnly) {
   const method=request.method;
   if (method!=='GET' && request.headers.get('Origin')!==url.origin) fail(403,'Invalid request origin.');
   const individualAccounts=env.STAFF_ACCOUNTS==='1';
+  const passwordAccounts=individualAccounts && env.STAFF_AUTH_MODE==='password';
   const namedLogin=individualAccounts && method==='POST' && path==='/api/staff/sign-in';
   const staffDashboard=individualAccounts && method==='GET' && path==='/api/staff/dashboard';
-  if (privateStaffOnly && !namedLogin && !staffDashboard) fail(404,'Not found.');
-  if (!privateStaffOnly && (namedLogin || staffDashboard) && env.STAFF_LOGIN_BACKEND==='durable-object') {
+  const credentialMutation=passwordAccounts && path==='/api/staff/accounts' && ['POST','PATCH'].includes(method);
+  const privateStaffRoute=namedLogin || staffDashboard || credentialMutation;
+  if (privateStaffOnly && !privateStaffRoute) fail(404,'Not found.');
+  if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
-    if (staffDashboard) return env.STAFF_LOGIN.getByName('staff-dashboard').fetch(request);
+    if (staffDashboard) {
+      return env.STAFF_LOGIN.getByName(passwordAccounts?'password-dashboard-v1':'staff-dashboard').fetch(request);
+    }
     const forwarded=new Request(request);
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    return env.STAFF_LOGIN.getByName('staff-login').fetch(forwarded);
+    return env.STAFF_LOGIN.getByName(passwordAccounts?'password-credentials-v1':'staff-login').fetch(forwarded);
   }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
@@ -123,18 +129,22 @@ async function route(request,env,privateStaffOnly) {
   const all=async (sql,...args)=>(await stmt(sql,...args).all()).results;
   const run=(sql,...args)=>stmt(sql,...args).run();
   const now=Date.now();
+  const staffAccountTable=passwordAccounts?'staff_accounts':'firebase_staff_accounts';
+  const staffSessionTable=passwordAccounts?'staff_sessions':'firebase_staff_sessions';
+  const namedCookie=passwordAccounts?'__Host-sht_staff':'kv_firebase_staff';
+  const staffCookie=individualAccounts?namedCookie:'kv_staff';
   const staffCredential=individualAccounts ? request.headers.get('Cookie')?.split(';').map(part=>part.trim())
-    .find(part=>part.startsWith('kv_firebase_staff='))?.slice('kv_firebase_staff='.length) ?? '' : '';
+    .find(part=>part.startsWith(namedCookie+'='))?.slice(namedCookie.length+1) ?? '' : '';
   const opaqueStaffCookie=tokenPattern.test(staffCredential);
-  const legacyStaffCookie=staffCredential.length<=3544 && staffCredential[43]==='~' &&
+  const legacyStaffCookie=!passwordAccounts && staffCredential.length<=3544 && staffCredential[43]==='~' &&
     tokenPattern.test(staffCredential.slice(0,43));
   const staffTokenHash=opaqueStaffCookie || legacyStaffCookie ? hash(staffCredential) : '';
   const firebaseReady=env.FIREBASE_PROJECT_ID && env.FIREBASE_AUTH_API_KEY;
   const staff=async()=>{
     if (!individualAccounts) return one('SELECT token FROM sessions WHERE token=? AND share IS NULL AND expires>?',cookie(request,'kv_staff'),now);
-    if (!firebaseReady || !staffTokenHash) return null;
-    const account=await one(`SELECT a.username,a.role,a.revision,a.firebase_uid FROM firebase_staff_sessions s
-      JOIN firebase_staff_accounts a USING(username)
+    if (!staffTokenHash || (!passwordAccounts && !firebaseReady)) return null;
+    const account=await one(`SELECT a.username,a.role,a.revision${passwordAccounts?'':',a.firebase_uid'} FROM ${staffSessionTable} s
+      JOIN ${staffAccountTable} a USING(username)
       WHERE s.token=? AND s.expires>? AND a.disabled=0 AND s.revision=a.revision`,staffTokenHash,now);
     if (!account || opaqueStaffCookie) return account;
     // Existing JWT-bearing sessions retain their original validation until they expire.
@@ -207,40 +217,53 @@ async function route(request,env,privateStaffOnly) {
   }
   if (method==='POST' && path==='/api/staff/sign-in') {
     if (individualAccounts) {
-      const input=await json(request);
+      const input=await json(request,2048);
       const username=normalizeUsername(input.username);
-      if (!firebaseReady) fail(503,'Staff sign-in has not been configured.');
+      const throttleScope=passwordAccounts?'password-staff':'staff';
+      if (!passwordAccounts && !firebaseReady) fail(503,'Staff sign-in has not been configured.');
       if (!usernamePattern.test(username) || !validPass(input.password,1)) {
-        await throttle('staff');
+        await throttle(throttleScope);
         fail(401,'Sign-in failed.');
       }
-      const [ipLimit,usernameLimit,lookup]=await db.batch([
-        stmt(attemptSql,attemptBucket('staff')),
-        stmt(attemptSql.replace('VALUES(?,1)','SELECT ?,1 WHERE changes()>0'),attemptBucket('staff-account',username)),
-        stmt('SELECT firebase_uid,email,disabled,revision FROM firebase_staff_accounts WHERE username=?',username),
+      const nextAttempt=attemptSql.replace('VALUES(?,1)','SELECT ?,1 WHERE changes()>0');
+      const accountFields=passwordAccounts?'password_verifier':'firebase_uid,email';
+      const limits=[
+        stmt(attemptSql,attemptBucket(throttleScope)),
+        stmt(nextAttempt,attemptBucket(throttleScope+'-account',username))
+      ];
+      if (passwordAccounts) limits.push(stmt(nextAttempt.replace('count<8','count<32'),attemptBucket('password-staff-global','all')));
+      const results=await db.batch([
+        ...limits,
+        stmt(`SELECT ${accountFields},disabled,revision FROM ${staffAccountTable} WHERE username=?`,username),
         stmt('DELETE FROM attempts WHERE bucket<?',String(minute-2)+':')
       ]);
-      if (!ipLimit.results.length || !usernameLimit.results.length) fail(429,'Too many attempts. Try again in a minute.');
-      const account=lookup.results[0];
-      if (!account || account.disabled) fail(401,'Sign-in failed.');
-      const response=await firebaseRequest(env.FIREBASE_AUTH_API_KEY,'signInWithPassword',{
-        email:account.email,password:input.password,returnSecureToken:true
-      });
-      if (response.status===429) fail(429,'Too many attempts. Try again later.');
-      if (response.status>=500) fail(503,'Staff sign-in is temporarily unavailable.');
-      if (!response.ok) fail(401,'Sign-in failed.');
-      const {idToken}=await response.json();
-      const claims=await verifyFirebaseToken(idToken,env.FIREBASE_PROJECT_ID,Date.now());
-      if (claims?.sub!==account.firebase_uid) fail(401,'Sign-in failed.');
-      // The Firebase token is consumed here. Only a random, revocable session ID leaves the Worker.
-      const token=secret(), expires=claims.exp*1000;
+      if (results.slice(0,limits.length).some(limit=>!limit.results.length)) fail(429,'Too many attempts. Try again in a minute.');
+      const account=results[limits.length].results[0];
+      let expires;
+      if (passwordAccounts) {
+        if (!verifyStaffPassword(input.password,account?.password_verifier) || !account || account.disabled) fail(401,'Sign-in failed.');
+        expires=Date.now()+hour;
+      } else {
+        if (!account || account.disabled) fail(401,'Sign-in failed.');
+        const response=await firebaseRequest(env.FIREBASE_AUTH_API_KEY,'signInWithPassword',{
+          email:account.email,password:input.password,returnSecureToken:true
+        });
+        if (response.status===429) fail(429,'Too many attempts. Try again later.');
+        if (response.status>=500) fail(503,'Staff sign-in is temporarily unavailable.');
+        if (!response.ok) fail(401,'Sign-in failed.');
+        const {idToken}=await response.json();
+        const claims=await verifyFirebaseToken(idToken,env.FIREBASE_PROJECT_ID,Date.now());
+        if (claims?.sub!==account.firebase_uid) fail(401,'Sign-in failed.');
+        expires=claims.exp*1000;
+      }
+      const token=secret();
       const result=await db.batch([
-        stmt('DELETE FROM firebase_staff_sessions WHERE expires<=? OR token=?',now,staffTokenHash),
-        stmt(`INSERT INTO firebase_staff_sessions SELECT ?,username,revision,? FROM firebase_staff_accounts
+        stmt(`DELETE FROM ${staffSessionTable} WHERE expires<=? OR token=?`,now,staffTokenHash),
+        stmt(`INSERT INTO ${staffSessionTable} SELECT ?,username,revision,? FROM ${staffAccountTable}
           WHERE username=? AND disabled=0 AND revision=?`,hash(token),expires,username,account.revision)
       ]);
       if (!result[1].meta.changes) fail(401,'Sign-in failed.');
-      return output({ok:true},200,setCookie('kv_firebase_staff',token,Math.floor((expires-Date.now())/1000),url.protocol==='https:'));
+      return output({ok:true},200,setCookie(staffCookie,token,Math.floor((expires-Date.now())/1000),passwordAccounts || url.protocol==='https:'));
     }
     await throttle('staff');
     if (!keyPattern.test(env.STAFF_RANDOM_HASH ?? '')) fail(503,'Staff sign-in has not been configured.');
@@ -272,33 +295,48 @@ async function route(request,env,privateStaffOnly) {
     const account=await requireStaff();
     if (path==='/api/staff/accounts') {
       if (account.role!=='administrator') fail(403,'Administrator access required.');
-      const administratorGuard=`EXISTS(SELECT 1 FROM firebase_staff_accounts a JOIN firebase_staff_sessions s USING(username)
+      const administratorGuard=`EXISTS(SELECT 1 FROM ${staffAccountTable} a JOIN ${staffSessionTable} s USING(username)
         WHERE a.username=? AND a.revision=? AND a.role='administrator' AND a.disabled=0
         AND s.token=? AND s.revision=a.revision AND s.expires>?)`;
       const administratorSession=()=>[account.username,account.revision,staffTokenHash,Date.now()];
-      if (method==='GET') return output({currentUsername:account.username,accounts:await all('SELECT username,role,disabled FROM firebase_staff_accounts ORDER BY username')});
+      if (method==='GET') return output({passwordAccounts,currentUsername:account.username,
+        accounts:await all(`SELECT username,role,disabled FROM ${staffAccountTable} ORDER BY username`)});
       if (method==='POST') {
-        const input=await json(request);
+        const input=await json(request,2048);
         const username=normalizeUsername(input.username);
-        const {firebaseUid,email,role}=input;
-        if (!usernamePattern.test(username) || typeof firebaseUid!=='string' || !firebaseUidPattern.test(firebaseUid) ||
-          typeof email!=='string' || !emailPattern.test(email) || !['editor','administrator'].includes(role)) {
-          fail(400,'Enter a username, Firebase user UID, email and role.');
+        const {firebaseUid,email,role,password}=input;
+        if (!usernamePattern.test(username) || !['editor','administrator'].includes(role)) fail(400,'Enter a valid username and role.');
+        let result;
+        if (passwordAccounts) {
+          if (!validNewStaffPassword(password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
+          result=await run(`INSERT INTO staff_accounts(username,password_verifier,role)
+            SELECT ?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,
+            username,hashStaffPassword(password),role,...administratorSession());
+        } else {
+          if (typeof firebaseUid!=='string' || !firebaseUidPattern.test(firebaseUid) ||
+            typeof email!=='string' || !emailPattern.test(email)) fail(400,'Enter a Firebase user UID and email.');
+          result=await run(`INSERT INTO firebase_staff_accounts(username,firebase_uid,email,role)
+            SELECT ?,?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,username,firebaseUid,email,role,...administratorSession());
         }
-        const result=await run(`INSERT INTO firebase_staff_accounts(username,firebase_uid,email,role)
-          SELECT ?,?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,username,firebaseUid,email,role,...administratorSession());
         if (!result.meta.changes) fail(409,'Username or administrator session changed.');
         return output({ok:true},201);
       }
       if (method==='PATCH') {
-        const input=await json(request);
+        const input=await json(request,2048);
         const username=normalizeUsername(input.username);
         if (!usernamePattern.test(username) || username===account.username) fail(400,'Choose another staff account.');
         const reset=input.action==='reset';
         if (!['reset','disable','enable'].includes(input.action)) fail(400,'Choose a valid account action.');
-        const target=await one('SELECT email FROM firebase_staff_accounts WHERE username=?',username);
+        const target=await one(`SELECT ${passwordAccounts?'username':'email'} FROM ${staffAccountTable} WHERE username=?`,username);
         if (!target) fail(404,'Staff account not found.');
-        const result=await run(`UPDATE firebase_staff_accounts SET disabled=CASE WHEN ? THEN disabled ELSE ? END,
+        if (reset && passwordAccounts) {
+          if (!validNewStaffPassword(input.password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
+          const result=await run(`UPDATE staff_accounts SET password_verifier=?,revision=revision+1
+            WHERE username=? AND ${administratorGuard}`,hashStaffPassword(input.password),username,...administratorSession());
+          if (!result.meta.changes) fail(409,'Account or administrator session changed.');
+          return output({ok:true});
+        }
+        const result=await run(`UPDATE ${staffAccountTable} SET disabled=CASE WHEN ? THEN disabled ELSE ? END,
           revision=revision+1 WHERE username=? AND ${administratorGuard}`,Number(reset),Number(input.action==='disable'),username,...administratorSession());
         if (!result.meta.changes) fail(409,'Account or administrator session changed.');
         if (reset) {
@@ -312,8 +350,9 @@ async function route(request,env,privateStaffOnly) {
       }
     }
     if (method==='POST' && path==='/api/staff/sign-out') {
-      await run(individualAccounts?'DELETE FROM firebase_staff_sessions WHERE token=?':'DELETE FROM sessions WHERE token=?',individualAccounts?staffTokenHash:cookie(request,'kv_staff'));
-      return output({ok:true},200,setCookie(individualAccounts?'kv_firebase_staff':'kv_staff','',0,url.protocol==='https:'));
+      await run(individualAccounts?`DELETE FROM ${staffSessionTable} WHERE token=?`:'DELETE FROM sessions WHERE token=?',
+        individualAccounts?staffTokenHash:cookie(request,'kv_staff'));
+      return output({ok:true},200,setCookie(staffCookie,'',0,passwordAccounts || url.protocol==='https:'));
     }
     if (method==='GET' && path==='/api/staff/offline') {
       const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,
