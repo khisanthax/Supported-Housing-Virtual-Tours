@@ -107,16 +107,17 @@ async function route(request,env,privateStaffOnly) {
   const path=url.pathname;
   const method=request.method;
   if (method!=='GET' && request.headers.get('Origin')!==url.origin) fail(403,'Invalid request origin.');
-  const individualAccounts=env.STAFF_ACCOUNTS==='1';
-  const passwordAccounts=individualAccounts && env.STAFF_AUTH_MODE==='password';
+  const passwordAccounts=env.STAFF_AUTH_MODE==='password';
+  const individualAccounts=passwordAccounts || env.STAFF_ACCOUNTS==='1';
   const namedLogin=individualAccounts && method==='POST' && path==='/api/staff/sign-in';
   const staffDashboard=individualAccounts && method==='GET' && path==='/api/staff/dashboard';
+  const accountList=passwordAccounts && method==='GET' && path==='/api/staff/accounts';
   const credentialMutation=passwordAccounts && path==='/api/staff/accounts' && ['POST','PATCH'].includes(method);
-  const privateStaffRoute=namedLogin || staffDashboard || credentialMutation;
+  const privateStaffRoute=namedLogin || staffDashboard || accountList || credentialMutation;
   if (privateStaffOnly && !privateStaffRoute) fail(404,'Not found.');
   if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
-    if (staffDashboard) {
+    if (staffDashboard || accountList) {
       return env.STAFF_LOGIN.getByName(passwordAccounts?'password-dashboard-v1':'staff-dashboard').fetch(request);
     }
     const forwarded=new Request(request);
@@ -222,16 +223,23 @@ async function route(request,env,privateStaffOnly) {
       const throttleScope=passwordAccounts?'password-staff':'staff';
       if (!passwordAccounts && !firebaseReady) fail(503,'Staff sign-in has not been configured.');
       if (!usernamePattern.test(username) || !validPass(input.password,1)) {
-        await throttle(throttleScope);
+        if (!passwordAccounts) await throttle(throttleScope);
         fail(401,'Sign-in failed.');
       }
       const nextAttempt=attemptSql.replace('VALUES(?,1)','SELECT ?,1 WHERE changes()>0');
       const accountFields=passwordAccounts?'password_verifier':'firebase_uid,email';
+      const usernameBucket=attemptBucket(throttleScope+'-account',username);
+      const globalBucket=passwordAccounts?attemptBucket('password-staff-global','all'):'';
+      const ipAttempt=passwordAccounts
+        ? stmt(attemptSql.replace('VALUES(?,1)',`SELECT ?,1 WHERE NOT EXISTS (
+            SELECT 1 FROM attempts WHERE (bucket=? AND count>=8) OR (bucket=? AND count>=32)
+          )`),attemptBucket(throttleScope),usernameBucket,globalBucket)
+        : stmt(attemptSql,attemptBucket(throttleScope));
       const limits=[
-        stmt(attemptSql,attemptBucket(throttleScope)),
-        stmt(nextAttempt,attemptBucket(throttleScope+'-account',username))
+        ipAttempt,
+        stmt(nextAttempt,usernameBucket)
       ];
-      if (passwordAccounts) limits.push(stmt(nextAttempt.replace('count<8','count<32'),attemptBucket('password-staff-global','all')));
+      if (passwordAccounts) limits.push(stmt(nextAttempt.replace('count<8','count<32'),globalBucket));
       const results=await db.batch([
         ...limits,
         stmt(`SELECT ${accountFields},disabled,revision FROM ${staffAccountTable} WHERE username=?`,username),

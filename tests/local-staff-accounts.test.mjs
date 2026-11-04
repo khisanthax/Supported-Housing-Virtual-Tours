@@ -108,6 +108,9 @@ test('local staff accounts use private password operations and revoke sessions o
   assert.equal((await create('')).status, 401);
   assert.equal((await request(accounts)).status, 401);
   assert.equal((await signIn('admin', adminPassword, { requestOrigin: 'https://example.test' })).status, 403);
+  delete env.STAFF_ACCOUNTS;
+  env.STAFF_RANDOM_HASH = digest(adminPassword);
+  assert.equal((await request('/api/staff/sign-in', { method: 'POST', body: { passphrase: adminPassword } })).status, 401);
   const beforeBindingFailure = delegated.length;
   delete env.STAFF_LOGIN;
   assert.equal((await signIn('admin', adminPassword)).status, 503);
@@ -204,5 +207,11 @@ test('local staff throttling, guest sessions and Firebase rollback remain isolat
     const response = await signIn('missing-user', editorPassword, { ip: 'source-' + attempt });
     assert.equal(response.status, attempt < 8 ? 401 : 429);
   }
+  const minute = Math.floor(Date.now() / 60000);
+  const globalBucket = minute + ':' + digest('password-staff-global:all');
+  database.prepare('UPDATE attempts SET count=32 WHERE bucket=?').run(globalBucket);
+  const before = database.prepare('SELECT COUNT(*) AS count FROM attempts').get().count;
+  assert.equal((await signIn('new-name', editorPassword, { ip: 'new-ip' })).status, 429);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM attempts').get().count, before);
   assert.equal(outbound.mock.callCount(), 0);
 });
