@@ -123,7 +123,9 @@ async function route(request,env,privateStaffOnly) {
     }
     const forwarded=new Request(request);
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    return env.STAFF_LOGIN.getByName(passwordAccounts?'password-credentials-v2':'staff-login').fetch(forwarded);
+    // D1 owns all counters and credentials, so a fixed pool can spread simultaneous derivations.
+    const actorName=passwordAccounts?'password-credentials-v3-'+(namedLogin?randomInt(4):0):'staff-login';
+    return env.STAFF_LOGIN.getByName(actorName).fetch(forwarded);
   }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
