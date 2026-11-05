@@ -2,6 +2,8 @@
 
 Open /staff on your approved pilot URL. Direct links to the editor also open staff sign-in if the session has ended. This deployment is a synthetic pilot.
 
+See [the pilot handoff](PILOT.md) for the six-step Fold 7 checklist, account onboarding and recovery, first approved apartment import, and backup restoration before publication. `.shtour` packages are unencrypted; save them in the approved encrypted backup location.
+
 ## Initial administrator
 
 In password mode, sign in at **/staff** with your username and password. An Administrator uses **Manage staff accounts** to create users, set or reset their passwords, and disable access. Staff Editors can edit tours and manage guest sharing without access to account administration. Use a separate password for each staff member and share initial or reset passwords privately. A reset or disable ends that account's active sessions. See the [deployment guide](DEPLOYMENT.md) for initial bootstrap.

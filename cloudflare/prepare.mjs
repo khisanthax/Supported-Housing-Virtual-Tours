@@ -86,6 +86,7 @@ form.addEventListener`)
     .replace('JSON.stringify({passphrase:form.elements.passphrase.value})',
       'JSON.stringify(individualAccounts ? {username:form.elements.username.value,password:form.elements.passphrase.value} : {passphrase:form.elements.passphrase.value})');
   if (name === 'staff.html') content = content
+    .replace('<nav class="actions">', '<nav class="actions"><a class="button secondary" href="https://github.com/khisanthax/Supported-Housing-Virtual-Tours/blob/main/PILOT.md" target="_blank" rel="noopener noreferrer">Staff guide</a>')
     .replace('<ul id="catalog">','<p><a hidden id="staff-accounts" href="/staff/accounts">Manage staff accounts</a></p><ul id="catalog">')
     .replace('Open tour editor','Start an apartment')
     .replace('<ul id="catalog"></ul>','<ul id="catalog"></ul><button class="secondary" id="cleanup">Clean up unused storage</button>')
@@ -105,6 +106,7 @@ form.addEventListener`)
     content = "import { exportApartment, importPackage } from '/sharing/worker-import.js';\n" + content
       .replace("data = await api('dashboard');","data = await api('dashboard');\n  $('staff-accounts').hidden = data.staffRole !== 'administrator';")
       .replace("await api('apartments'+(replacement ? '?replace='+encodeURIComponent(replacement) : ''),'POST',file);","await importPackage(file,replacement,data.apartments.find(item=>item.id===replacement)?.version);")
+      .replace("say(replacement ? 'Apartment updated.' : 'Apartment imported privately.');", "say(replacement ? 'Backup imported as a private draft. Publish explicitly to update guests.' : 'Backup imported as a private draft.');")
       .replaceAll('Import an apartment first.', 'Create and publish an apartment first.')
       .replace("$('passphrase').required = $('expiration').required = !editing;","$('expiration').required = !editing;")
       .replace("$('passphrase').disabled = $('expiration').disabled = !!editing;","$('expiration').disabled = !!editing;")
@@ -173,6 +175,7 @@ $('create').onclick`)
   }));`);
   }
   if (name === 'staff.html') content = content
+    .replace('Existing guest links will show the new tour. Staff with offline copies will see an update when they reconnect.', 'This replaces the latest staff draft. The published guest tour stays unchanged until you choose Publish latest draft. Staff offline downloads use the latest draft.')
     .replace(/<label hidden id="rotation-length">[\s\S]*?<\/label>/,'')
     .replace('</main>', '<dialog id="rotate-dialog"><form method="dialog"><h2>Regenerate guest phrase?</h2><p>The old phrase or code and all current guest sessions will stop working. The existing link still works with the new phrase.</p><label>New phrase length<select id="rotate-count"><option value="3">3 words</option><option value="5">5 words</option><option value="7">7 words</option></select></label><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="rotate">Regenerate phrase</button></div></form></dialog></main>');
   if (name === 'staff.html') content = content
