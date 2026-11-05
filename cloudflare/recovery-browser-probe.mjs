@@ -1,0 +1,53 @@
+// Explicit, resumable recovery operation. Private inputs/state/backups never belong in Git.
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
+import {unpackTour} from '../dist/tour-package.js';
+const origin=process.env.PILOT_PROBE_ORIGIN,root=process.env.PILOT_RECOVERY_DIR,archive=process.env.PILOT_RECOVERY_ZIP;
+assert.ok(origin&&root&&archive&&process.env.PILOT_PROBE_STAFF&&process.env.PILOT_PROBE_USERNAME,'Supply authorized recovery inputs through the environment.');
+const title='Photorealistic House — Demo',stateFile=join(root,'recovery-state.json'),backupPath=join(root,'Photorealistic-House-Demo.shtour');
+const source=JSON.parse(await readFile(join(root,'source-image-index.json'),'utf8'));
+assert.equal(source.length,8);const names=source.map(s=>s.name.replace(/^\d+_/,'').replace(/\.jpe?g$/i,'').replaceAll('_',' '));
+const digest=b=>createHash('sha256').update(b).digest('hex');
+let state;try{state=JSON.parse(await readFile(stateFile,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+const {chromium}=await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href);
+const args=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'];
+const desktop=await chromium.launch({args}),edge=await chromium.launch({channel:'msedge',args});
+let pc,phone,clone;
+async function login(browser,mobile=false){const p=await browser.newPage({viewport:mobile?{width:900,height:900}:{width:1440,height:1050},hasTouch:mobile});p.on('dialog',d=>d.accept());await p.goto(origin+'/staff');await p.locator('#username-field input').fill(process.env.PILOT_PROBE_USERNAME);await p.locator('input[name=passphrase]').fill(process.env.PILOT_PROBE_STAFF);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByRole('heading',{name:'Apartment Gallery',exact:true}).waitFor();return p;}
+async function draft(id,p=pc){const r=await p.request.get(origin+'/api/staff/drafts/'+id);assert.equal(r.status(),200);return r.json();}
+async function save(p,action){const [r]=await Promise.all([p.waitForResponse(r=>r.url()===origin+'/api/staff/apartments'&&r.request().method()==='POST'),action()]);assert.equal(r.status(),201,await r.text());const d=await r.json();if(await p.locator('#guide-status').count())await p.waitForFunction(()=>!document.querySelector('#guide-status').textContent.includes('Saving…'));return d;}
+async function bytes(id,room,p=pc){const r=await p.request.get(origin+'/api/staff/tours/'+id+'/images/'+room);assert.equal(r.status(),200);return r.body();}
+async function verifyImages(id,p=pc){const d=await draft(id,p);assert.equal(d.tour.title,title);assert.deepEqual(d.tour.rooms.map(r=>r.name),names);assert.equal(d.tour.rooms.length,8);for(const [i,r]of d.tour.rooms.entries())assert.equal(digest(await bytes(id,r.id,p)),source[i].sha256);return d;}
+async function spheres(p){await p.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();await p.locator('#guide-viewer').waitFor();for(const name of names){await p.locator('#room-tabs').getByRole('button',{name,exact:true}).click();await p.locator('#scene-name').getByText(name,{exact:true}).waitFor();await p.locator('#loading').waitFor({state:'hidden'});assert.equal(await p.locator('#error').isVisible(),false);assert.ok(await p.locator('#pano canvas').count());}}
+try{
+ pc=await login(desktop);
+ if(!state){assert.equal(process.env.PILOT_RECOVERY_CREATE,'1','Explicit creation flag required.');const dashboard=await(await pc.request.get(origin+'/api/staff/dashboard')).json();assert.equal(dashboard.apartments.filter(a=>a.title===title).length,0,'Matching named record already exists; inspect it instead of creating a duplicate.');await pc.getByRole('link',{name:/NEW APARTMENT/}).click();await pc.waitForURL('**/*apartment=*');state={apartment:new URL(pc.url()).searchParams.get('apartment'),createdAt:new Date().toISOString()};await writeFile(stateFile,JSON.stringify(state));}
+ else await pc.goto(origin+'/staff/editor/?apartment='+state.apartment);
+ await pc.locator('#guide-title').waitFor();let d=await draft(state.apartment);
+ if(d.tour.title!==title){assert.equal(d.tour.title,'Untitled apartment');assert.equal(d.tour.rooms.length,0);await pc.locator('#guide-title').fill(title);await save(pc,()=>pc.locator('#guide-title').press('Tab'));}
+ if(!d.tour.rooms.length){const picker=pc.waitForEvent('filechooser');await pc.getByRole('button',{name:'ADD STITCH',exact:true}).click();await(await picker).setFiles(archive);const review=pc.getByRole('dialog',{name:'Review stitched panoramas'});await review.waitFor();assert.equal(await review.locator('img').count(),8);for(let i=0;i<8;i++){await review.locator('section').nth(i).locator('input').fill(names[i]);await review.locator('section').nth(i).locator('select').selectOption('add');}await save(pc,()=>review.getByRole('button',{name:'Upload and save draft'}).click());await review.waitFor({state:'hidden'});}
+ d=await verifyImages(state.apartment);await pc.getByRole('button',{name:'2. Arrange Rooms',exact:true}).click();
+ // Spaced editing tiles deliberately infer no unverified room-to-room topology.
+ for(const [i,r]of d.tour.rooms.entries()){if(d.tour.grid.positions[r.id])continue;await pc.locator('.stitch-card[data-room="'+r.id+'"] .stitch-select').click();await pc.locator('#guide-col').selectOption({value:String((i%4)*2)});await pc.locator('#guide-row').selectOption({value:String(Math.floor(i/4)*2)});await save(pc,()=>pc.getByRole('button',{name:'Place selected stitch',exact:true}).click());}
+ d=await verifyImages(state.apartment);assert.equal(d.tour.builder.unplaced.length,0);assert.equal(Object.keys(d.tour.grid.positions).length,8);assert.equal(d.tour.rooms.flatMap(r=>r.links).length,0);const original=structuredClone(d.tour);
+ assert.equal(await pc.locator('.stitch-card').count(),8);assert.equal(await pc.locator('.guide-tile').count(),8);await pc.screenshot({path:join(root,'recovered-grid.png')});
+ console.log('PASS eight source JPEGs retained exactly in the private filmstrip and spaced grid.');
+ await spheres(pc);await pc.screenshot({path:join(root,'recovered-panorama.png')});await pc.reload();await pc.locator('#guide-title').waitFor();assert.deepEqual((await draft(state.apartment)).tour,original);
+ phone=await login(edge,true);await phone.goto(origin+'/staff/editor/?apartment='+state.apartment);await phone.locator('#guide-title').waitFor();assert.deepEqual((await verifyImages(state.apartment,phone)).tour,original);await spheres(phone);
+ await pc.goto(origin+'/staff');const card=pc.locator('#catalog>li[data-apartment="'+state.apartment+'"]');await card.getByRole('heading',{name:title,exact:true}).waitFor();await card.locator('img').evaluate(img=>img.decode());assert.ok(await card.locator('img').evaluate(i=>i.naturalWidth===1774));assert.ok(await card.getByRole('button',{name:'Share',exact:true}).isDisabled());await card.screenshot({path:join(root,'recovered-gallery-card.png')});
+ const thumb=await pc.request.get(origin+'/api/staff/tours/'+state.apartment+'/thumbnail');assert.equal(thumb.status(),200);assert.equal(digest(await thumb.body()),source[0].sha256);
+ await card.locator('details').evaluate(n=>n.open=true);const [download]=await Promise.all([pc.waitForEvent('download'),card.getByRole('button',{name:'Export .shtour',exact:true}).click()]);await download.saveAs(backupPath);const packed=await unpackTour(new Blob([await readFile(backupPath)]));assert.deepEqual(packed.tour,original);for(const [i,r]of original.rooms.entries())assert.equal(digest(Buffer.from(await packed.images.get(r.id).arrayBuffer())),source[i].sha256);
+ await pc.locator('details').filter({has:pc.locator('#import')}).evaluate(n=>n.open=true);await pc.locator('#replace-apartment').selectOption('');await pc.locator('#import input[type=file]').setInputFiles(backupPath);const restored=await save(pc,()=>pc.locator('#import').getByRole('button',{name:'Import apartment',exact:true}).click());clone=restored.id;assert.notEqual(clone,state.apartment);assert.deepEqual((await verifyImages(clone)).tour,original);
+ await pc.goto(origin+'/staff/editor/?apartment='+clone);await pc.locator('#guide-title').waitFor();await pc.locator('.stitch-card').first().locator('.stitch-menu').click();const picker=pc.waitForEvent('filechooser');await pc.getByRole('dialog',{name:'Stitch actions'}).getByRole('button',{name:'Replace Stitch',exact:true}).click();await(await picker).setFiles(join(root,'recovered-images',source[1].name));const replacement=pc.getByRole('dialog',{name:'Replace Stitch',exact:true});await replacement.locator('img').evaluate(i=>i.decode());await save(pc,()=>replacement.getByRole('button',{name:'Save replacement',exact:true}).click());const changed=await draft(clone);assert.deepEqual(changed.tour,original);assert.equal(digest(await bytes(clone,original.startRoom)),source[1].sha256);assert.deepEqual((await verifyImages(state.apartment)).tour,original);
+ const dashboard=await(await pc.request.get(origin+'/api/staff/dashboard')).json();assert.equal(dashboard.apartments.find(a=>a.id===state.apartment).published,0);assert.equal(dashboard.apartments.find(a=>a.id===clone).published,0);
+ const forbidden=await pc.request.post(origin+'/api/staff/shares',{headers:{Origin:origin},data:{apartments:[state.apartment],expires:Date.now()+600000,wordCount:3}});assert.equal(forbidden.status(),400);
+ const anon=await desktop.newPage();assert.equal((await anon.request.get(origin+'/api/staff/tours/'+state.apartment+'/images/'+original.startRoom)).status(),401);assert.equal((await anon.request.get(origin+'/api/guest/tours/'+state.apartment+'/images/'+original.startRoom)).status(),401);assert.equal((await anon.request.get(origin+'/images/'+original.startRoom+'.jpg')).status(),404);await anon.close();
+ state={...state,verifiedAt:new Date().toISOString(),name:title,viewpoints:8,backup:backupPath};await writeFile(stateFile,JSON.stringify(state));console.log('PASS recovered private Gallery card and photorealistic thumbnail, eight exact JPEGs and spheres, filmstrip/grid, reload/independent Edge, complete backup/restoration, clone-only photo replacement and guest denial.');
+}finally{
+ if(clone&&pc){const d=await draft(clone);assert.equal(d.tour.title,title);assert.equal((await pc.request.patch(origin+'/api/staff/apartments/'+clone,{headers:{Origin:origin},data:{action:'remove',expectedVersion:d.revision}})).status(),200);}
+ for(const p of [pc,phone])if(p)await p.request.post(origin+'/api/staff/sign-out',{headers:{Origin:origin}}).catch(()=>{});
+ await desktop.close();await edge.close();
+}
