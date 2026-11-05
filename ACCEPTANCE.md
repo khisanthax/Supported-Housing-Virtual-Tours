@@ -10,7 +10,8 @@ GitHub main at `c3e3ca7` already contained PRs #5 and #6. The canonical reposito
 
 | Area | Actual evidence |
 | --- | --- |
-| Regression | 26 Node tests pass, including password policy, roles, revocation, ZIP safety, private sharing, backups and offline encryption. |
+| Regression | 31 Node tests pass, including password policy, roles, revocation, ZIP safety, private sharing, backups, offline encryption, grid validation and incomplete-publication rejection. |
+| Room grid and gallery | Six uploaded synthetic JPEGs produce thumbnail tiles. Mouse and CDP touch drags snap to cells; adjacency, connector removal/restoration and nonadjacent manual links pass. Both panorama arrows are placed explicitly; incomplete publishing is rejected and complete publishing succeeds. Reload, independent Edge, `.shtour` import/export, folded/unfolded viewports and protected gallery thumbnails pass locally and live. Physical Fold testing remains separate. |
 | Hosted editor | Desktop Chromium and independent Edge at a mobile viewport: image previews, retry after injected upload failure, reciprocal arrows, reload, cross-browser draft persistence, photo replacement retaining links, stale-save rejection and logout. |
 | ZIP import | Local Worker, six synthetic stitched JPEGs: filename suggestions, six previews, retry, room import and cross-browser replacement. |
 | Guest isolation | Hosted two-apartment normalized phrase, exact catalog scope, excluded apartment denial, protected JPEGs, editor denial, unpublish and immediate share revocation. |

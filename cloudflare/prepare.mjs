@@ -8,7 +8,7 @@ async function put(name,bytes) {
   await writeFile(url,bytes);
 }
 const copy = async (from,to) => put(to,await readFile(new URL(from,root)));
-const common = ['styles.css','app.js','tour-data.js','vendor/marzipano.js'];
+const common = ['styles.css','app.js','tour-data.js','room-grid.js','vendor/marzipano.js'];
 const index = await readFile(new URL('dist/index.html',root),'utf8');
 const guestViewer = index.replace('<body>','<body data-guest="true">')
   .replace(/(href|src)="(styles\.css|app\.js|vendor\/marzipano\.js)"/g,'$1="/viewer/$2"')
@@ -43,7 +43,7 @@ for (const name of common) {
   await copy('dist/'+name,'staff/editor/'+name);
   await copy('dist/'+name,'offline/'+name);
 }
-for (const name of ['editor.css','tour-package.js']) await copy('dist/'+name,'staff/editor/'+name);
+for (const name of ['editor.css','tour-package.js','room-grid-ui.js']) await copy('dist/'+name,'staff/editor/'+name);
 for (const name of ['living.jpg','kitchen.jpg','bedroom.jpg']) await copy('cloudflare/sample-images/'+name,'staff/editor/images/'+name);
 await copy('cloudflare/sample.json','staff/editor/data/apartment.json');
 for (const name of ['batch-review.js','batch-draft.js','panorama-zip.js']) await copy('cloudflare/'+name,'staff/editor/'+name);
@@ -55,7 +55,7 @@ await put('staff/editor/tour-editor.js',"import { importBatch } from './batch-dr
   .replace(/  function askNames\([\s\S]*?(?=  filesFrom\('add-rooms')/, '')
   .replace('files => addRooms(files, false)', 'files => importBatch(files, draft, false, verifyImage, commit)')
   .replace('files => addRooms(files, true)', 'files => importBatch(files, draft, true, verifyImage, commit)')
-  .replace('keepView = true) {\n    validateDraft(next);', 'keepView = true, progress) {\n    validateDraft(next);')
+  .replace('keepView = true) {', 'keepView = true, progress) {')
   .replace('saveDraft(next, revision)', 'saveDraft(next, revision, progress)')
   .replace('await inspectJpeg(blob);', `const {width,height}=await inspectJpeg(blob);
   if (blob.size>4*1024*1024 || width>8192 || height>4096) throw new Error('Use a JPEG no larger than 4 MiB and 8192 × 4096.');
@@ -147,7 +147,13 @@ $('create').onclick`)
   });
   $('create').onclick`)
       .replace("$('catalog').replaceChildren(...data.apartments.map(a=>el('li',a.title)));", `$('catalog').replaceChildren(...data.apartments.map(a=>{
-    const item=el('li',a.title + (a.archived ? ' · Archived' : a.published ? ' · Published' : ' · Private draft'));
+    const item=el('li',null,'gallery-card');
+    const image=el('img'); image.alt=''; image.loading='lazy'; image.decoding='async';
+    image.src='/api/staff/tours/'+a.id+'/thumbnail?version='+a.version;
+    image.onerror=()=>{ image.hidden=true; };
+    const heading=el('h3',a.title);
+    const badge=el('span',a.archived ? 'Archived' : a.published ? 'Published' : 'Private draft','badge');
+    item.append(image,heading,badge);
     const controls=el('div',null,'actions');
     const edit=el('a','Edit draft','button secondary');
     edit.href='/staff/editor/?apartment='+a.id;
@@ -175,6 +181,10 @@ $('create').onclick`)
   }));`);
   }
   if (name === 'staff.html') content = content
+    .replace('<title>Guest links · Supported Housing</title>', '<title>Apartment gallery · Supported Housing</title>')
+    .replace('<h1>Guest links</h1>', '<h1>Apartment gallery</h1>')
+    .replace('Share a private selection of apartments with one link and one passphrase.', 'Manage your apartments, connect rooms and share approved tours.')
+    .replace('<ul id="catalog">', '<ul id="catalog" class="staff-gallery">')
     .replace('Existing guest links will show the new tour. Staff with offline copies will see an update when they reconnect.', 'This replaces the latest staff draft. The published guest tour stays unchanged until you choose Publish latest draft. Staff offline downloads use the latest draft.')
     .replace(/<label hidden id="rotation-length">[\s\S]*?<\/label>/,'')
     .replace('</main>', '<dialog id="rotate-dialog"><form method="dialog"><h2>Regenerate guest phrase?</h2><p>The old phrase or code and all current guest sessions will stop working. The existing link still works with the new phrase.</p><label>New phrase length<select id="rotate-count"><option value="3">3 words</option><option value="5">5 words</option><option value="7">7 words</option></select></label><div class="actions"><button value="cancel" class="secondary">Cancel</button><button value="rotate">Regenerate phrase</button></div></form></dialog></main>');

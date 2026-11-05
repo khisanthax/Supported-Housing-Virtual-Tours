@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import worker, { StaffLogin } from '../cloudflare/worker.mjs';
 import { hashStaffPassword } from '../cloudflare/staff-password.mjs';
+import { moveGridRoom } from '../dist/room-grid.js';
 
 const origin = 'https://synthetic-test.workers.dev';
 const adminPassword = 'Synthetic administrator password';
@@ -94,6 +95,31 @@ function session(response) {
   assert.doesNotMatch(header, /(?:^|;\s*)Domain=/i);
   return header.split(';')[0];
 }
+
+test('cloud grid drafts reject incomplete publication and thumbnails require current staff authorization', async t => {
+  const { database, env, request, signIn } = await fixture(t);
+  database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)')
+    .run('admin', hashStaffPassword(adminPassword), 'administrator');
+  const admin = session(await signIn('admin', adminPassword));
+  const tour = JSON.parse(await readFile(new URL('../cloudflare/sample.json', import.meta.url)));
+  tour.rooms.forEach(r => r.links = []);
+  moveGridRoom(tour, tour.rooms[1].id, 1, 0);
+  const photos = Object.fromEntries(tour.rooms.map((r,i) => [r.id, String(i+1).repeat(32)]));
+  for (const photo of Object.values(photos)) database.prepare('INSERT INTO photos(id,bytes,ready) VALUES(?,1,1)').run(photo);
+  const saved = await request('/api/staff/apartments', { method:'POST', cookie:admin, body:{tour,photos} });
+  assert.equal(saved.status,201);
+  const {id,version} = await saved.json();
+  const publish = () => request('/api/staff/apartments/'+id,{method:'PATCH',cookie:admin,body:{action:'publish',expectedVersion:version}});
+  assert.equal((await publish()).status,400);
+  env.PHOTOS = { get: async () => new Uint8Array([255,216,255,217]) };
+  const thumb = '/api/staff/tours/'+id+'/thumbnail';
+  assert.equal((await request(thumb)).status,401);
+  assert.equal((await request(thumb,{cookie:admin})).status,200);
+  const invalid = structuredClone(tour); invalid.grid.positions[tour.rooms[1].id] = {x:0,y:0};
+  assert.equal((await request('/api/staff/apartments',{method:'POST',cookie:admin,body:{tour:invalid,photos}})).status,400);
+  database.prepare("UPDATE staff_accounts SET disabled=1 WHERE username='admin'").run();
+  assert.equal((await request(thumb,{cookie:admin})).status,401);
+});
 
 test('local staff accounts use private password operations and revoke sessions on reset, disable, expiry and logout', async t => {
   const { database, env, binding, outbound, delegated, passwordWork, request, signIn } = await fixture(t);

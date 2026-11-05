@@ -1,4 +1,5 @@
 import { validateApartment, validateDimensions } from './tour-data.js';
+import { edgeKey, reconcileGrid } from './room-grid.js';
 
 export const MAX_ROOMS = 12;
 export const MAX_IMAGE = 40 * 1024 * 1024;
@@ -59,7 +60,7 @@ export function validateDraft(draft) {
   if (size > MAX_TOTAL) throw new Error('The combined JPEG size must be at most 160 MB.');
   for (const entries of pairs.values()) {
     const [first, second] = entries;
-    if (entries.length !== 2 || first.room !== second.target || first.target !== second.room || (first.pending && second.pending)) {
+    if (entries.length !== 2 || first.room !== second.target || first.target !== second.room) {
       throw new Error('A doorway connection must have two reciprocal arrows.');
     }
   }
@@ -69,6 +70,11 @@ export function validateDraft(draft) {
 export function addConnection(tour, from, target, point) {
   const destination = tour.rooms.find(room => room.id === target);
   if (!destination || destination === from) throw new Error('Choose another room.');
+  if (tour.grid) {
+    const key = edgeKey(from.id, target);
+    if (!tour.grid.manual.includes(key)) tour.grid.manual.push(key);
+    tour.grid.blocked = tour.grid.blocked.filter(k => k !== key);
+  }
   const used = new Set(tour.rooms.flatMap(room => room.links.map(link => link.pairId)));
   let number = 1;
   while (used.has(`door-${number}`)) number++;
@@ -78,8 +84,7 @@ export function addConnection(tour, from, target, point) {
 }
 
 function returnArrow(from, destination, pairId) {
-  const { yaw, pitch } = destination.initialView;
-  return { target: from.id, yaw: Math.atan2(Math.sin(yaw), Math.cos(yaw)), pitch, pairId, pending: true };
+  return { target: from.id, pairId, pending: true };
 }
 
 export function pairedArrow(tour, link) {
@@ -94,6 +99,13 @@ export function retargetConnection(tour, from, index, target) {
   if (link.target === target) return;
   const destination = tour.rooms.find(room => room.id === target);
   if (!destination || destination === from) throw new Error('Choose another room.');
+  if (tour.grid) {
+    const old = edgeKey(from.id, link.target), next = edgeKey(from.id, target);
+    tour.grid.manual = tour.grid.manual.filter(k => k !== old);
+    if (!tour.grid.blocked.includes(old)) tour.grid.blocked.push(old);
+    if (!tour.grid.manual.includes(next)) tour.grid.manual.push(next);
+    tour.grid.blocked = tour.grid.blocked.filter(k => k !== next);
+  }
   if (!link.pairId) {
     const { yaw, pitch } = link;
     from.links.splice(index, 1);
@@ -110,6 +122,10 @@ export function retargetConnection(tour, from, index, target) {
 }
 
 export function removeConnection(tour, from, index) {
+  if (tour.grid) {
+    const key = edgeKey(from.id, from.links[index].target);
+    if (!tour.grid.blocked.includes(key)) tour.grid.blocked.push(key);
+  }
   const reverse = pairedArrow(tour, from.links[index]);
   if (reverse) reverse.room.links.splice(reverse.index, 1);
   from.links.splice(index, 1);
@@ -157,5 +173,6 @@ export function deleteRoom(draft, id) {
   if (tour.startRoom === id) tour.startRoom = tour.rooms[0].id;
   const images = new Map(draft.images);
   images.delete(id);
+  if (tour.grid) reconcileGrid(tour);
   return { tour, images };
 }

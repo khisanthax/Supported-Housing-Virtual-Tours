@@ -1,3 +1,4 @@
+import { validateGrid } from './room-grid.js';
 export function validateApartment(data) {
   if (!data || typeof data.title !== 'string' || !data.title.trim() || !Array.isArray(data.rooms) || !data.rooms.length) throw new Error('Apartment needs a title and rooms.');
   const ids = new Set();
@@ -12,8 +13,11 @@ export function validateApartment(data) {
   }
   if (!ids.has(data.startRoom)) throw new Error('Start room does not exist.');
   for (const room of data.rooms) for (const link of room.links) {
-    if (!link || !ids.has(link.target) || link.target === room.id || !Number.isFinite(link.yaw) || !Number.isFinite(link.pitch) || Math.abs(link.pitch) > Math.PI / 2) throw new Error('Invalid doorway target or position.');
+    if (!link || !ids.has(link.target) || link.target === room.id || (link.pending !== undefined && typeof link.pending !== 'boolean') ||
+        (link.pending !== true && (!Number.isFinite(link.yaw) || !Number.isFinite(link.pitch))) ||
+        (link.yaw !== undefined && !Number.isFinite(link.yaw)) || (link.pitch !== undefined && (!Number.isFinite(link.pitch) || Math.abs(link.pitch) > Math.PI / 2))) throw new Error('Invalid doorway target or position.');
   }
+  validateGrid(data);
   return data;
 }
 export function validateDimensions(width, height) {

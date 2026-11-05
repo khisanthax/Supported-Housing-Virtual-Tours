@@ -233,7 +233,7 @@ async function route(request,env,privateStaffOnly) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
-  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|vendor\/marzipano\.js)?$/.test(path)) {
+  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|vendor\/marzipano\.js)?$/.test(path)) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
@@ -241,7 +241,7 @@ async function route(request,env,privateStaffOnly) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+'index.html' : path);
   }
-  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|vendor\/marzipano\.js)$/.test(path)) {
+  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|vendor\/marzipano\.js)$/.test(path)) {
     await requireGuest();
     return asset(path);
   }
@@ -405,7 +405,8 @@ async function route(request,env,privateStaffOnly) {
     const offline=/^\/api\/staff\/offline\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
     if (method==='GET' && offline) {
       const [,apartment,,room]=offline;
-      const version=await one(`SELECT v.* FROM versions v WHERE v.apartment=?
+      const version=await one(`SELECT v.*${room?'':`,(SELECT json_group_array(json_object('room',j.key,'bytes',p.bytes))
+        FROM json_each(v.photos) j JOIN photos p ON p.id=j.value) AS offline_images`} FROM versions v WHERE v.apartment=?
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.seq DESC LIMIT 1`,apartment);
       if (!version) fail(404,'Offline tour not found.');
@@ -414,7 +415,7 @@ async function route(request,env,privateStaffOnly) {
         if (url.searchParams.get('revision')!==revision) fail(409,'The apartment changed. Download the new version.');
         return tourAsset(version,room,env);
       }
-      const images=await all(`SELECT j.key AS room,p.bytes FROM json_each(?) j JOIN photos p ON p.id=j.value`,version.photos);
+      const images=JSON.parse(version.offline_images);
       const offlineHours=env.TOUR_OFFLINE_HOURS===undefined ? 24 : Number(env.TOUR_OFFLINE_HOURS);
       if (!Number.isInteger(offlineHours) || offlineHours<1 || offlineHours>168) fail(503,'Offline access duration is not configured correctly.');
       return output({tour:JSON.parse(version.manifest),revision,expires:now+offlineHours*hour,images});
@@ -463,7 +464,7 @@ async function route(request,env,privateStaffOnly) {
       } catch(error) { if (error.message.includes('UNIQUE')) fail(409,'This apartment changed. Refresh and try again.'); throw error; }
       return output({id:apartment,version:seq,available},201);
     }
-    const staffTour=/^\/api\/staff\/tours\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
+    const staffTour=/^\/api\/staff\/tours\/([a-f0-9]{32})\/(manifest|thumbnail|images\/([a-z0-9-]+))$/.exec(path);
     const lifecycle=/^\/api\/staff\/apartments\/([a-f0-9]{32})$/.exec(path);
     if (method==='PATCH' && lifecycle) {
       const apartment=lifecycle[1];
@@ -499,7 +500,7 @@ async function route(request,env,privateStaffOnly) {
       if (await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=2',staffTour[1])) fail(404,'Tour not found.');
       const version=await current(staffTour[1]);
       if (url.searchParams.has('version') && String(version?.seq)!==url.searchParams.get('version')) fail(409,'Tour changed. Export again.');
-      return tourAsset(version,staffTour[3],env);
+      return tourAsset(version,staffTour[2]==='thumbnail'?JSON.parse(version.manifest).startRoom:staffTour[3],env);
     }
     const draftRoute=/^\/api\/staff\/drafts\/([a-f0-9]{32})$/.exec(path);
     if (method==='GET' && draftRoute) {
