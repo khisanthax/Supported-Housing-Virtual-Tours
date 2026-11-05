@@ -61,3 +61,24 @@ test('password bootstrap reads stdin and only inserts an administrator into an e
     database.close();
   }
 });
+
+test('operator recovery resets only an existing administrator and invalidates its session revision', () => {
+  const script=fileURLToPath(new URL('../cloudflare/bootstrap-password-admin.mjs',import.meta.url));
+  const recover=username=>spawnSync(process.execPath,[script,username,'--recover'],{encoding:'utf8',input:password+'\n'});
+  const database=new DatabaseSync(':memory:');
+  try {
+    database.exec('CREATE TABLE staff_accounts(username TEXT PRIMARY KEY,password_verifier TEXT,role TEXT,disabled INTEGER,revision INTEGER)');
+    database.exec("INSERT INTO staff_accounts VALUES('admin','previous','administrator',1,7),('editor','unchanged','editor',0,1)");
+    const recovery=recover('admin');
+    assert.equal(recovery.status,0,recovery.stderr);
+    assert.equal(recovery.stdout.includes(password),false);
+    database.exec(recovery.stdout);
+    const account=database.prepare("SELECT * FROM staff_accounts WHERE username='admin'").get();
+    assert.equal(account.revision,8);
+    assert.equal(account.disabled,0);
+    assert.equal(verifyStaffPassword(password,account.password_verifier),true);
+    for(const username of ['editor','missing']) database.exec(recover(username).stdout);
+    assert.equal(database.prepare("SELECT password_verifier FROM staff_accounts WHERE username='editor'").get().password_verifier,'unchanged');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM staff_accounts').get().n,2);
+  } finally { database.close(); }
+});

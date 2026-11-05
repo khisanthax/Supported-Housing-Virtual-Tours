@@ -7,18 +7,22 @@ const passphrase = process.env.PILOT_PROBE_STAFF ??
 assert.ok(passphrase);
 const desktop = await chromium.launch({ executablePath:process.env.PILOT_CHROMIUM, args:['--enable-unsafe-swiftshader'] });
 const second = await chromium.launch({ channel:'msedge', args:['--enable-unsafe-swiftshader'] });
+let page, disposableId, disposableShare;
 try {
   const title = 'Synthetic cloud editor check ' + Date.now();
   async function signIn(browser, mobile) {
     const page = await browser.newPage(mobile ? {viewport:{width:360,height:800},isMobile:true,hasTouch:true,deviceScaleFactor:2} : {});
     await page.goto(origin + '/staff/editor/');
     await page.waitForURL('**/staff');
+    if (process.env.PILOT_PROBE_USERNAME) {
+      await page.locator('#username-field input').fill(process.env.PILOT_PROBE_USERNAME);
+    }
     await page.locator('input[name=passphrase]').fill(passphrase);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('link',{name:'Start an apartment'}).waitFor();
     return page;
   }
-  const page = await signIn(desktop,false);
+  page = await signIn(desktop,false);
   await page.getByRole('link',{name:'Start an apartment'}).click();
   async function openEditor(page, mobile=false) {
     await page.waitForFunction(()=>document.querySelector('#announcement')?.textContent.includes('opened') ||
@@ -58,6 +62,7 @@ try {
   await page.locator('#editor-feedback').getByText('Doorway arrow positioned.').waitFor();
   const url = page.url();
   const id = new URL(url).searchParams.get('apartment');
+  disposableId = id;
   const endpoint = origin + '/api/staff/drafts/' + id;
   const draft = async browserPage => (await browserPage.request.get(endpoint)).json();
   const saved = await draft(page);
@@ -101,12 +106,13 @@ try {
     const dashboard=await (await staffApi('dashboard')).json();
     const other=dashboard.apartments.find(item=>item.id!==id && item.published);
     assert.ok(other);
-    const shareData={apartments:[id,other.id],expires:Date.now()+3600000};
+    const shareData={apartments:[id,other.id],expires:Date.now()+3600000,wordCount:3};
     assert.equal((await staffApi('shares','POST',shareData)).status(),400);
     assert.equal((await staffApi('apartments/'+id,'PATCH',{action:'publish',expectedVersion:replaced.revision})).status(),200);
     const shareResponse=await staffApi('shares','POST',shareData);
     assert.equal(shareResponse.status(),201);
     const share=await shareResponse.json();
+    disposableShare=share.id;
     await mobile.goto(share.url);
     await mobile.getByLabel('Guest access phrase').fill(share.code.toUpperCase().replaceAll('-',' '));
     await mobile.getByRole('button',{name:'Open shared apartments'}).tap();
@@ -126,12 +132,27 @@ try {
     assert.equal((await staffApi('apartments/'+id,'PATCH',{action:'unpublish',expectedVersion:replaced.revision})).status(),200);
     assert.equal((await mobile.request.get(photo)).status(),404);
     assert.equal((await staffApi('shares/'+share.id,'DELETE')).status(),200);
+    disposableShare=null;
     assert.equal((await mobile.request.get(photo)).status(),401);
     assert.equal((await staffApi('apartments/'+id,'PATCH',{action:'remove',expectedVersion:replaced.revision})).status(),200);
+    disposableId=null;
     assert.equal((await staffApi('cleanup','POST')).status(),200);
     console.log('PASS publish, two-apartment phrase sign-in at mobile viewport, guest isolation, unpublish, revoke, remove and cleanup');
   }
 } finally {
+  if (page && disposableShare) {
+    assert.equal((await page.request.delete(origin+'/api/staff/shares/'+disposableShare,{headers:{Origin:origin}})).status(),200);
+  }
+  if (page && disposableId) {
+    const response=await page.request.get(origin+'/api/staff/drafts/'+disposableId);
+    if(response.ok()) {
+      const draft=await response.json();
+      assert.match(draft.tour.title,/^Synthetic cloud editor check /);
+      assert.equal((await page.request.patch(origin+'/api/staff/apartments/'+disposableId,{
+        headers:{Origin:origin},data:{action:'remove',expectedVersion:draft.revision}
+      })).status(),200);
+    }
+  }
   await desktop.close();
   await second.close();
 }

@@ -415,7 +415,9 @@ async function route(request,env,privateStaffOnly) {
         return tourAsset(version,room,env);
       }
       const images=await all(`SELECT j.key AS room,p.bytes FROM json_each(?) j JOIN photos p ON p.id=j.value`,version.photos);
-      return output({tour:JSON.parse(version.manifest),revision,expires:now+24*hour,images});
+      const offlineHours=env.TOUR_OFFLINE_HOURS===undefined ? 24 : Number(env.TOUR_OFFLINE_HOURS);
+      if (!Number.isInteger(offlineHours) || offlineHours<1 || offlineHours>168) fail(503,'Offline access duration is not configured correctly.');
+      return output({tour:JSON.parse(version.manifest),revision,expires:now+offlineHours*hour,images});
     }
     if (method==='POST' && path==='/api/staff/photos') {
       if (request.headers.get('Content-Type')!=='image/jpeg') fail(415,'Send one stitched JPEG.');

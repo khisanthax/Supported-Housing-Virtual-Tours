@@ -2,8 +2,9 @@ import { hashStaffPassword, normalizeUsername, usernamePattern } from './staff-p
 
 const args = process.argv.slice(2);
 const username = normalizeUsername(args[0]);
-if (args.length !== 1 || !usernamePattern.test(username) || process.stdin.isTTY) {
-  throw new Error('Usage: securely pipe the password to node cloudflare/bootstrap-password-admin.mjs USERNAME');
+const recovery = args.length===2 && args[1]==='--recover';
+if ((!recovery && args.length !== 1) || !usernamePattern.test(username) || process.stdin.isTTY) {
+  throw new Error('Usage: securely pipe the password to node cloudflare/bootstrap-password-admin.mjs USERNAME [--recover]');
 }
 
 const chunks = [];
@@ -26,6 +27,8 @@ else if (password.endsWith('\n')) password = password.slice(0, -1);
 
 const verifier = hashStaffPassword(password);
 const quote = value => "'" + value.replaceAll("'", "''") + "'";
-process.stdout.write(`INSERT INTO staff_accounts (username,password_verifier,role)
+process.stdout.write(recovery ? `UPDATE staff_accounts SET password_verifier=${quote(verifier)},disabled=0,revision=revision+1
+WHERE username=${quote(username)} AND role='administrator';
+SELECT changes() AS recovered_administrators;\n` : `INSERT INTO staff_accounts (username,password_verifier,role)
 SELECT ${quote(username)},${quote(verifier)},'administrator'
 WHERE NOT EXISTS (SELECT 1 FROM staff_accounts);\n`);
