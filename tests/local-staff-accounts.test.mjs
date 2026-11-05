@@ -177,6 +177,18 @@ test('local staff accounts use private password operations and revoke sessions o
   const { revision, tour: storedTour } = await (await request('/api/staff/drafts/' + apartment, { cookie: admin })).json();
   assert.equal(storedTour.title, edit.tour.title);
   assert.equal(revision, version + 1);
+  const offlineManifest='/api/staff/offline/'+apartment+'/manifest';
+  assert.equal((await request(offlineManifest)).status,401);
+  assert.equal((await (await request(offlineManifest,{cookie:admin})).json()).expires,Date.now()+24*3600000);
+  for (const hours of ['1','168']) {
+    env.TOUR_OFFLINE_HOURS=hours;
+    assert.equal((await (await request(offlineManifest,{cookie:admin})).json()).expires,Date.now()+Number(hours)*3600000);
+  }
+  for (const hours of ['0','169','1.5','invalid']) {
+    env.TOUR_OFFLINE_HOURS=hours;
+    assert.equal((await request(offlineManifest,{cookie:admin})).status,503);
+  }
+  delete env.TOUR_OFFLINE_HOURS;
   assert.equal((await change(admin, 'disable')).status, 200);
   assert.equal((await request(dashboard, { cookie: replacement })).status, 401);
   assert.equal((await saveDraft(replacement, { ...edit, expectedVersion: revision })).status, 401);
