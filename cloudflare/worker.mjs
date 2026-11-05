@@ -4,6 +4,7 @@ import { emailPattern, firebaseRequest, firebaseUidPattern, verifyFirebaseToken 
 import { hashStaffPassword, normalizeUsername, usernamePattern, validNewStaffPassword, verifyStaffPassword } from './staff-password.mjs';
 import { inspectJpeg, MAX_ROOMS } from '../dist/tour-package.js';
 import { validateApartment } from '../dist/tour-data.js';
+import { visitorManifest } from '../dist/layout-state.js';
 
 const idPattern = /^[a-f0-9]{32}$/;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -234,7 +235,7 @@ async function route(request,env,privateStaffOnly) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
-  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|vendor\/marzipano\.js)?$/.test(path)) {
+  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|layout-state\.js|vendor\/marzipano\.js)?$/.test(path)) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
@@ -243,7 +244,7 @@ async function route(request,env,privateStaffOnly) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
   }
-  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|vendor\/marzipano\.js)$/.test(path)) {
+  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|layout-state\.js|vendor\/marzipano\.js)$/.test(path)) {
     await requireGuest();
     return asset(path);
   }
@@ -635,14 +636,14 @@ async function route(request,env,privateStaffOnly) {
         ORDER BY v.seq DESC LIMIT 1`,cookie(request,'kv_guest'),now,now,apartment,now);
     if (!version) { await requireGuest(); fail(404,'Tour not found or preparing.'); }
     if (group==='guest/tour' && !kind) return asset('/viewer/index.html');
-    if (group==='api/guest/tours' && kind) return tourAsset(version,kind==='thumbnail'?JSON.parse(version.manifest).startRoom:room,env);
+    if (group==='api/guest/tours' && kind) return tourAsset(version,kind==='thumbnail'?JSON.parse(version.manifest).startRoom:room,env,true);
   }
   fail(404,'Not found.');
 }
 
-export async function tourAsset(version,room,env) {
+export async function tourAsset(version,room,env,guest=false) {
   if (!version) fail(404,'Tour not found.');
-  if (!room) return output(JSON.parse(version.manifest),200,{'X-Tour-Version':String(version.seq)});
+  if (!room) { const tour=JSON.parse(version.manifest); return output(guest?visitorManifest(tour):tour,200,{'X-Tour-Version':String(version.seq)}); }
   const photos=JSON.parse(version.photos);
   if (!Object.hasOwn(photos,room)) fail(404,'Photo not found.');
   const value=await env.PHOTOS.get(photos[room],{type:'stream',cacheTtl:30});

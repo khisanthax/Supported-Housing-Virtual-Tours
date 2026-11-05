@@ -1,8 +1,8 @@
-const CACHE = 'housing-offline-v4';
+const CACHE = 'housing-offline-v5';
 const SHELL = [
   '/offline/', '/offline/app.webmanifest', '/offline/icon-192.png', '/offline/icon-512.png',
   '/offline/styles.css', '/offline/offline.css', '/offline/app.js',
-  '/offline/offline.js', '/offline/offline-store.js', '/offline/tour-data.js', '/offline/room-grid.js', '/offline/builder-data.js',
+  '/offline/offline.js', '/offline/offline-store.js', '/offline/tour-data.js', '/offline/room-grid.js', '/offline/builder-data.js', '/offline/layout-state.js',
   '/offline/vendor/marzipano.js'
 ];
 self.addEventListener('install', event => {

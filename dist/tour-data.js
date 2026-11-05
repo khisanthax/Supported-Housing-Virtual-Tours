@@ -1,5 +1,6 @@
 import { validateGrid } from './room-grid.js';
 import { validateBuilder } from './builder-data.js';
+import { validateLayoutCheckpoint } from './layout-state.js';
 export function validateApartment(data, { draft = false } = {}) {
   if (!data || typeof data.title !== 'string' || !data.title.trim() || !Array.isArray(data.rooms) || (!data.rooms.length && !(draft && data.builder))) throw new Error('Apartment needs a title and rooms.');
   const ids = new Set();
@@ -21,6 +22,7 @@ export function validateApartment(data, { draft = false } = {}) {
   }
   validateBuilder(data, draft);
   validateGrid(data);
+  validateLayoutCheckpoint(data);
   return data;
 }
 export function validateDimensions(width, height) {
