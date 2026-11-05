@@ -1,6 +1,6 @@
 # Photorealistic house recovery — 5 November 2026
 
-The live staff Gallery now contains **Photorealistic House — Demo**, a private draft with eight supplied generated panoramas: Living Room, Kitchen, Dining Room, Hallway, Bedroom, Bathroom, Home Office and Mudroom. It has not been published or added to guest permissions.
+The live staff Gallery contains **Photorealistic House — Demo**, with eight supplied generated panoramas: Living Room, Kitchen, Dining Room, Hallway, Bedroom, Bathroom, Home Office and Mudroom. Its latest private draft has a blank grid. An older publication already existed before the layout correction and remains unchanged; the Gallery therefore shows Published. No guest-share permission references this apartment.
 
 ## What was found
 
@@ -26,7 +26,7 @@ Preservation checks confirmed all 137 earlier version rows, 285 photo records, 5
 
 The verified package is Photorealistic-House-Demo.shtour in the operator's Downloads folder, with a second copy in the private recovery directory under LOCALAPPDATA/SupportedHousingTour/house-recovery. Its size is 2,590,636 bytes. The package contains all eight images, names, layout and draft metadata. It is unencrypted; keep it in protected storage. It omits staff accounts and guest links.
 
-The later layout correction adds **Photorealistic-House-Demo-before-reset.shtour** and **Photorealistic-House-Demo-unplaced-with-checkpoint.shtour** in Downloads, with private second copies under LOCALAPPDATA/SupportedHousingTour/layout-doorway. Both were unpacked and checked against all eight original JPEGs. The after-reset package is 2,593,078 bytes and includes the recovery checkpoint. Keep both; they represent different accepted editing states. Post-reset checks preserved all 179 earlier versions, 302 photo records, 55 visibility records, 59 permissions and 45 shares. The apartment remains never-published and has no guest permission.
+The later layout correction adds **Photorealistic-House-Demo-before-reset.shtour** and **Photorealistic-House-Demo-unplaced-with-checkpoint.shtour** in Downloads, with private second copies under LOCALAPPDATA/SupportedHousingTour/layout-doorway. Both were unpacked and checked against all eight original JPEGs. The after-reset package is 2,593,078 bytes and includes the recovery checkpoint. Keep both; they represent different accepted editing states. Post-reset checks preserved all 179 earlier versions, 302 photo records, 55 visibility records, 59 permissions and 45 shares. This includes the house's earlier publication: only the working draft layout changed, with no new publication or guest permission.
 
 Private source ZIP/JPEGs, snapshots, cloud identifiers, browser screenshots and packages stay outside this public repository. Existing staff backup import can restore the package as a new private apartment without coding. Restore to a new apartment when rehearsing, compare every image, and remove only the disposable rehearsal copy.
 
