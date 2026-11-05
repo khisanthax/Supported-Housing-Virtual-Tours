@@ -68,7 +68,7 @@ See LOGBOOK.md for verification history and outstanding checks.
 
 ## Archived and offline tours
 
-Use **Archive** to withdraw a tour from guests and offline downloads while keeping the latest draft and its backup available to staff. **Restore as draft** keeps the apartment unpublished until staff explicitly publish again. Use the room order buttons to change the sequence without moving arrows or changing the start room.
+Use **Archive** to withdraw a tour from guests and offline downloads while keeping the latest draft and its backup available to staff. **Restore as draft** keeps the apartment unpublished until staff explicitly publish again. Existing viewpoint order and starting-room selection remain part of the cloud draft and backup.
 
 Open **Available Offline** while signed in to download selected tours to this device. Set a separate local vault passphrase and save only tours needed on the device. Reopen the installed app while disconnected and unlock the vault to view saved tours. Downloads expire after the configured offline window (24 hours by default). Online checks can detect archives, changes and expired staff sessions. A disconnected device cannot receive a remote revocation. Sign out while online to clear the local vault. The browser or operating system can reclaim local storage, so keep a separate backup.
 
