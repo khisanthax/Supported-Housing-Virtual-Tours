@@ -1,6 +1,8 @@
 import { addConnection, deleteRoom, inspectJpeg, MAX_ROOMS, packTour, pairedArrow, removeConnection, retargetConnection, unpackTour, validateDraft } from './tour-package.js';
 import { loadDraft, saveDraft } from './tour-store.js';
 import { validateDimensions } from './tour-data.js';
+import { reconcileGrid } from './room-grid.js';
+import { createRoomGrid } from './room-grid-ui.js';
 
 const $ = id => document.getElementById(id);
 
@@ -21,6 +23,16 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
   let draft, revision = 0, mode = 'sample', selected = null, placement = null, busy = false, editRoomId;
   const room = () => draft?.tour.rooms.find(item => item.id === currentRoom()?.id);
   const pendingCount = () => draft?.tour.rooms.reduce((sum, item) => sum + item.links.filter(link => link.pending).length, 0) ?? 0;
+  const grid = createRoomGrid({ host: $('room-grid'), isBusy: () => busy,
+    change: mutate => perform(async () => {
+      const next = { tour: structuredClone(draft.tour), images: new Map(draft.images) };
+      mutate(next.tour);
+      await commit(next, currentRoom().id, 'Room layout and connections saved.');
+    }).then(() => grid.render(draft)),
+    open: id => perform(() => openRoom(id)),
+    position: (id, index) => perform(async () => { await openRoom(id); selected = index; renderDoors(); })
+      .then(() => { if (room()?.id === id) beginPlacement('move'); })
+  });
   const status = message => {
     $('editor-status').textContent = message;
     $('editor-feedback').textContent = message;
@@ -85,6 +97,7 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     if (editRoomId !== active.id) selected = null;
     editRoomId = active.id;
     renderDoors();
+    grid.render(draft);
   }
   function selectDoor(index, reveal = false) {
     if (busy || !room()?.links[index]) return;
@@ -108,12 +121,13 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     }
   }
   async function commit(next, preferredRoom, message, keepView = true) {
+    if (next.tour.grid || next.tour.rooms.some(r => !draft?.tour.rooms.some(old => old.id === r.id))) reconcileGrid(next.tour);
     validateDraft(next);
     revision = await saveDraft(next, revision);
     draft = next;
     await showTour(draft.tour, draft.images, preferredRoom, keepView);
     const unfinished = pendingCount();
-    status(`${message || 'Saved on this device.'}${unfinished ? ` ${unfinished} return ${unfinished === 1 ? 'arrow needs' : 'arrows need'} positioning.` : ''}`);
+    status(`${message || 'Saved on this device.'}${unfinished ? ` ${unfinished} ${unfinished === 1 ? 'arrow needs' : 'arrows need'} positioning.` : ''}`);
   }
   function modify(mutate, message, keepView = true) {
     const active = room();
@@ -147,7 +161,7 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     selected = null;
     renderMode();
     await showTour(draft.tour, draft.images, fromPreview ? editRoomId : undefined);
-    status(pendingCount() ? `${pendingCount()} return arrows still need positioning. Check the room arrow lists.` : 'Draft saved on this device. Export a backup to move or keep a copy.');
+    status(pendingCount() ? `${pendingCount()} arrows still need positioning. Check the room arrow lists.` : 'Draft saved on this device. Export a backup to move or keep a copy.');
   }));
   $('exit-editor').addEventListener('click', () => perform(async () => {
     cancelPlacement();
@@ -161,7 +175,7 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     mode = 'preview';
     renderMode();
     await showTour(draft.tour, draft.images);
-    status(pendingCount() ? 'Visitor preview · Return arrows without a position are hidden.' : 'Visitor preview · Private to this browser');
+    status(pendingCount() ? 'Visitor preview · Unpositioned arrows are hidden. Finish both directions before publishing.' : 'Visitor preview · Private to this browser');
     $('tour').scrollIntoView({ block: 'nearest' });
   }));
   $('tour-title-form').addEventListener('submit', event => {

@@ -26,7 +26,7 @@ try {
   await page.getByRole('link',{name:'Start an apartment'}).click();
   async function openEditor(page, mobile=false) {
     await page.waitForFunction(()=>document.querySelector('#announcement')?.textContent.includes('opened') ||
-      !document.querySelector('#error').hidden);
+      document.querySelector('#error')?.hidden === false);
     assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
     if (mobile) await page.locator('#edit-tour').tap();
     else await page.locator('#edit-tour').click();

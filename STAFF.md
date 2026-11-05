@@ -34,6 +34,18 @@ The script copies the passphrase to the clipboard from a DPAPI-encrypted file un
 
 JPEG limits are 4 MiB per image and 8192 × 4096 pixels at approximately 2:1. A ZIP can contain up to 64 entries, must be at most 32 MiB compressed, and can declare at most 48 MiB extracted. A review batch accepts up to 24 images and a tour accepts up to 12 viewpoints. Unsafe paths, nested archives, unsupported ZIP formats, excessive expansion and corrupt data are rejected. Byte-for-byte duplicates are flagged. A 2:1 JPEG can still be a cropped or unstitched image, so check its preview and its 360° view.
 
+## Visual room grid
+
+The hosted catalog is a Gallery: each card shows the apartment's starting image, title and private/published/archived state, with its existing edit, backup, publication and lifecycle controls. Thumbnails require a current staff session and load as cards approach the viewport. They use the existing JPEGs; no separate image-processing service or storage product is used.
+
+After uploading and naming viewpoints, arrange their tiles under **Room layout**. Drag only the **Move** handle; touch the rest of the grid to scroll. The panorama remains a separate panning surface. Tiles snap to empty cells on an 8 × 8 sketch. Keyboard arrow keys on a Move handle and the Room/Column/Row controls provide alternatives to dragging. Give multiple viewpoints distinct names such as “Living room · entry” and “Living room · window”.
+
+Tiles sharing an edge create a two-way connection. Tap its connector or its connection-list button to remove or restore it. Removed edges stay disabled when tiles are moved away and back. Use **Connect room → To room → Connect rooms** for nonadjacent rooms. Moving a tile removes auto-connections that cease to share an edge; explicit manual connections remain. Existing tours initially treat their original links as manual so opening or arranging an old tour cannot silently discard its navigation. Unchanged connections keep their positioned arrows. Restoring a removed connection requires positioning its new arrows again.
+
+The grid chooses **which** rooms connect. Each direction below it shows **Needs position** or **Positioned**. Choose a direction to open that panorama, then tap its actual doorway. Repeat in the destination panorama for the return. New connections have no guessed coordinates, and publication is rejected until every arrow is positioned. Visitor preview hides pending arrows and warns about them.
+
+Layout, manual links, disabled edges and arrow positions save with the versioned cloud draft and travel in `.shtour` backups. Earlier tours and packages without a grid still work. These edits do not change a live guest publication until **Publish latest draft** is chosen. Offline downloads use the latest complete staff draft and retain their existing access restrictions.
+
 ## Send an invitation
 
 Create a guest link, select the published apartments and set an expiration. Choose a three-, five-, or seven-word phrase. Copy the link and phrase separately if you can send them through different channels. **Copy Invitation** includes both in one message when that is more convenient. Guests can enter the words with spaces or hyphens in any capitalization. Older codes remain valid until expiry or regeneration. **Regenerate phrase** keeps the original link and immediately ends existing sessions. Keep the original link when you create it, since the server stores only its digest.

@@ -47,7 +47,7 @@
     <section id="editor-panel" class="editor-panel" aria-labelledby="editor-title" hidden>
       <div class="editor-heading"><div><p class="eyebrow">STAFF WORKSPACE</p><h2 id="editor-title">Edit this tour</h2></div><p>Saved in this browser. Export a backup before clearing browser data or switching devices.</p></div>
       <fieldset id="editor-fields" class="editor-fields">
-        <div class="editor-card">
+        <div class="editor-card apartment-files">
           <h3>Apartment and files</h3>
           <form id="tour-title-form"><label>Apartment title<input id="draft-title" required maxlength="120"></label><button class="edit-button secondary">Save title</button></form>
           <div class="edit-actions">
@@ -58,6 +58,7 @@
           </div>
           <p class="edit-help">Choose one completed, stitched 2:1 JPEG per viewpoint. Capture frames are not accepted. You’ll name each room before saving.</p>
         </div>
+        <div id="room-grid" class="editor-card room-grid-panel" aria-label="Room grid editor"></div>
         <div class="editor-card">
           <h3>Current room <span id="start-badge" class="start-badge" hidden>Start room</span></h3>
           <form id="room-name-form"><label>Room name<input id="draft-room-name" required maxlength="80"></label><button class="edit-button secondary">Save name</button></form>
