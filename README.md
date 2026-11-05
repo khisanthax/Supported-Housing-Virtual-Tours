@@ -7,3 +7,5 @@ Use Node.js 24. Run `npm test` for regression tests and `npm start` for the stan
 The Cloudflare pilot uses Workers, D1 for manifests and permissions, and KV for private JPEGs. The Node sharing server is a separate prototype. See [deployment](DEPLOYMENT.md), [staff workflow](STAFF.md), [staff offline viewing](OFFLINE.md), [acceptance evidence and remaining gates](ACCEPTANCE.md), and [project log](LOGBOOK.md).
 
 The [pilot handoff](PILOT.md) covers the physical Fold 7 test, staff onboarding and recovery, and importing the first approved apartment without coding.
+
+The hosted editor starts in the Apartment Gallery and guides staff through Upload Photos, Arrange Rooms, Place Doorways and Preview & Publish. See [actual synthetic application screenshots](docs/EDITOR-SCREENSHOTS.md) and [the staff guide](STAFF.md).

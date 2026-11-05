@@ -7,7 +7,7 @@ const state = { data: null, viewer: null, scene: null, room: null, request: 0, o
 let editor;
 let imageUrls = new Map();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-function report(message) { $('error').textContent = message; $('error').hidden = false; $('loading').hidden = true; }
+function report(message) { $('error').textContent = message; $('error').hidden = false; $('loading').hidden = true;if($('guide-status'))$('guide-status').textContent=message; }
 function readImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -210,6 +210,21 @@ async function init() {
         $('apartment-title').textContent = 'Saved apartment';
         $('scene-name').textContent = $('room-title').textContent = $('room-description').textContent = $('announcement').textContent = '';
         document.title = 'Available Offline · Supported Housing';
+      });
+      return;
+    }
+    if (document.body.dataset.guided === 'true') {
+      const { createGuidedEditor } = await import('./guided-editor.js');
+      editor = await createGuidedEditor({ showTour, openRoom, currentRoom: () => state.room,
+        coordinatesAt: event => {
+          if (!state.scene || state.busy) throw new Error('Wait for the panorama to open.');
+          state.viewer.updateSize();
+          const rect = $('pano').getBoundingClientRect();
+          const point = state.scene.view().screenToCoordinates(event.detail === 0 ? {x: $('pano').clientWidth/2,y: $('pano').clientHeight/2}
+            : {x:(event.clientX-rect.left)*$('pano').clientWidth/rect.width,y:(event.clientY-rect.top)*$('pano').clientHeight/rect.height});
+          if(!Number.isFinite(point.yaw)||!Number.isFinite(point.pitch))throw new Error('Wait for the panorama to finish sizing, then tap the doorway again.');
+          return point;
+        }
       });
       return;
     }

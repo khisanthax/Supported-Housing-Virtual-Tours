@@ -17,6 +17,7 @@ let page, share;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function signIn(browser) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  page.on('dialog', dialog=>dialog.accept());
   await page.goto(origin + '/staff');
   if (process.env.PILOT_PROBE_USERNAME) await page.locator('#username-field input').fill(process.env.PILOT_PROBE_USERNAME);
   await page.locator('input[name=passphrase]').fill(password);
@@ -31,6 +32,7 @@ async function api(path, method = 'GET', data, expected = 200, client = page) {
 }
 async function importBackup(bytes, replacement = '') {
   await page.goto(origin + '/staff');
+  await page.locator('details').filter({has:page.locator('#import')}).evaluate(d=>{d.open=true;});
   await page.locator('#replace-apartment option').first().waitFor({ state: 'attached' });
   await page.locator('#replace-apartment').selectOption(replacement);
   await page.locator('#import input[type=file]').setInputFiles({ name: 'synthetic-restore.shtour', mimeType: 'application/octet-stream', buffer: bytes });
@@ -38,11 +40,6 @@ async function importBackup(bytes, replacement = '') {
     page.waitForResponse(r => r.url() === origin + '/api/staff/apartments' && r.request().method() === 'POST'),
     (async () => {
       await page.locator('#import').getByRole('button', { name: 'Import apartment', exact: true }).click();
-      if (replacement) {
-        const dialog = page.getByRole('dialog', { name: 'Replace this apartment?' });
-        await dialog.getByText(/published guest tour stays unchanged/).waitFor();
-        await dialog.getByRole('button', { name: 'Replace apartment', exact: true }).click();
-      }
     })()
   ]);
   assert.equal(response.status(), 201);
@@ -61,6 +58,7 @@ try {
   disposable.set(created.id, created.version);
   await page.reload();
   const row = page.locator('#catalog li').filter({ hasText: tour.title });
+  await row.locator('details').evaluate(d=>{d.open=true;});
   const pending = page.waitForEvent('download');
   await row.getByRole('button', { name: 'Export .shtour', exact: true }).click();
   const download = await pending;
@@ -92,11 +90,13 @@ try {
     assert.equal(digest(await r.body()), hashes.get(room.id));
   }
   await other.goto(origin + '/staff/editor/?apartment=' + restored.id);
+  await other.locator('#guide-title').waitFor();
+  await other.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();
   await other.locator('#loading').waitFor({ state: 'hidden' });
   assert.equal(await other.locator('#error').isVisible(), false);
   for (const room of tour.rooms) {
     await other.locator('#room-tabs').getByRole('button', { name: room.name, exact: true }).click();
-    await other.locator('#room-title').getByText(room.name, { exact: true }).waitFor();
+    await other.locator('#scene-name').getByText(room.name, { exact: true }).waitFor();
   }
   console.log('PASS browser export, original removal, new private restore, complete manifest/JPEG byte equality and independent Edge retrieval');
   if (process.env.PILOT_TEST_PUBLISH === '1') {

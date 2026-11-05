@@ -36,8 +36,8 @@ async function editor(p) {
 }
 try {
   page = await login(browser);
-  await page.getByRole('heading', { name: 'Apartment gallery', exact: true }).waitFor();
-  await page.getByRole('link', { name: 'Start an apartment' }).click(); await editor(page);
+  await page.getByRole('heading', { name: 'Apartment Gallery', exact: true }).waitFor();
+  await page.goto(origin+'/staff/editor/?legacy=1'); await editor(page);
   const sample = JSON.parse(await readFile(new URL('../dist/data/apartment.json', import.meta.url)));
   await page.locator('#new-tour').setInputFiles(sample.rooms.map(r => fileURLToPath(new URL('../dist/' + r.image, import.meta.url))));
   const review = page.getByRole('dialog', { name: 'Review stitched panoramas' });

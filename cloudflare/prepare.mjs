@@ -8,7 +8,7 @@ async function put(name,bytes) {
   await writeFile(url,bytes);
 }
 const copy = async (from,to) => put(to,await readFile(new URL(from,root)));
-const common = ['styles.css','app.js','tour-data.js','room-grid.js','vendor/marzipano.js'];
+const common = ['styles.css','app.js','tour-data.js','room-grid.js','builder-data.js','vendor/marzipano.js'];
 const index = await readFile(new URL('dist/index.html',root),'utf8');
 const guestViewer = index.replace('<body>','<body data-guest="true">')
   .replace(/(href|src)="(styles\.css|app\.js|vendor\/marzipano\.js)"/g,'$1="/viewer/$2"')
@@ -44,6 +44,10 @@ for (const name of common) {
   await copy('dist/'+name,'offline/'+name);
 }
 for (const name of ['editor.css','tour-package.js','room-grid-ui.js']) await copy('dist/'+name,'staff/editor/'+name);
+await put('staff/editor/legacy.html',await readFile(new URL('staff/editor/index.html',output)));
+let guidedIndex=await readFile(new URL('staff/editor/index.html',output),'utf8');
+await put('staff/editor/index.html',guidedIndex.replace('<body>','<body data-guided="true">').replace('</head>','<link rel="stylesheet" href="guided-editor.css"></head>'));
+for(const name of ['guided-editor.js','guided-editor.css'])await copy('cloudflare/'+name,'staff/editor/'+name);
 for (const name of ['living.jpg','kitchen.jpg','bedroom.jpg']) await copy('cloudflare/sample-images/'+name,'staff/editor/images/'+name);
 await copy('cloudflare/sample.json','staff/editor/data/apartment.json');
 for (const name of ['batch-review.js','batch-draft.js','panorama-zip.js']) await copy('cloudflare/'+name,'staff/editor/'+name);
@@ -195,6 +199,20 @@ $('create').onclick`)
   await put('sharing/'+name,content);
 }
 await copy('cloudflare/worker-import.js','sharing/worker-import.js');
+await copy('cloudflare/gallery.html','sharing/gallery.html');
+await copy('cloudflare/gallery.js','sharing/gallery.js');
+let guestLinks=await readFile(new URL('sharing/staff.html',output),'utf8');
+guestLinks=guestLinks.replace('<body>','<body class="guest-links-page">').replace('<h1>Apartment gallery</h1>','<h1>Guest Links</h1>').replace('<nav class="actions">','<nav class="actions"><a class="button secondary" href="/staff">Apartment Gallery</a>');
+await put('sharing/staff.html',guestLinks);
+let linksScript=await readFile(new URL('sharing/staff.js',output),'utf8');
+linksScript=linksScript.replace('refresh().catch(e=>say(e.message));',`refresh().then(()=>{
+  const selected=new URL(location.href).searchParams.get('apartment');
+  if(selected&&data.apartments.some(a=>a.id===selected&&a.published)){
+    $('create').click();
+    for(const checkbox of $('choices').querySelectorAll('input'))checkbox.checked=checkbox.value===selected;
+  }
+}).catch(e=>say(e.message));`);
+await put('sharing/staff.js',linksScript);
 const vars = new URL('./.dev.vars',import.meta.url);
 let settings = '';
 try { settings = await readFile(vars,'utf8'); }
