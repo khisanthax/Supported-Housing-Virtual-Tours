@@ -13,7 +13,12 @@ export const hasStitch = (tour, id) => !tour.builder?.missing.includes(id);
 export function retainConnections(tour) {
   for (const room of tour.rooms) for (const link of room.links) {
     const key = [room.id, link.target].sort().join('|');
-    if (!tour.grid.manual.includes(key)) tour.grid.manual.push(key);
+    if (!tour.grid.manual.includes(key)) {
+      tour.grid.manual.push(key);
+      // Retained adjacency is still grid-generated, so Reset can distinguish it from explicit doors.
+      tour.grid.inferred??=[];
+      if(!tour.grid.inferred.includes(key))tour.grid.inferred.push(key);
+    }
   }
 }
 export function unplace(tour, id) {

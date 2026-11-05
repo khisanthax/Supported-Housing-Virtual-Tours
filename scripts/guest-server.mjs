@@ -1,3 +1,4 @@
+import {visitorManifest} from '../dist/layout-state.js';
 import http from 'node:http';
 import https from 'node:https';
 import { DatabaseSync } from 'node:sqlite';
@@ -19,12 +20,12 @@ const uuidPattern = /^[a-f0-9]{32}$/;
 const hour = 3_600_000;
 const assets = {
   'styles.css': 'text/css', 'editor.css': 'text/css', 'app.js': 'text/javascript',
-  'tour-data.js': 'text/javascript', 'room-grid.js': 'text/javascript', 'builder-data.js': 'text/javascript', 'room-grid-ui.js': 'text/javascript', 'vendor/marzipano.js': 'text/javascript',
+  'tour-data.js': 'text/javascript', 'room-grid.js': 'text/javascript', 'builder-data.js': 'text/javascript', 'layout-state.js': 'text/javascript', 'room-grid-ui.js': 'text/javascript', 'vendor/marzipano.js': 'text/javascript',
   'tour-editor.js': 'text/javascript', 'tour-package.js': 'text/javascript', 'tour-store.js': 'text/javascript',
   'data/apartment.json': 'application/json', 'images/living.jpg': 'image/jpeg',
   'images/kitchen.jpg': 'image/jpeg', 'images/bedroom.jpg': 'image/jpeg'
 };
-const commonAssets = new Set(['styles.css', 'app.js', 'tour-data.js', 'room-grid.js', 'builder-data.js', 'vendor/marzipano.js']);
+const commonAssets = new Set(['styles.css', 'app.js', 'tour-data.js', 'room-grid.js', 'builder-data.js','layout-state.js', 'vendor/marzipano.js']);
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function validPass(value, min) {
   return typeof value === 'string' && value.length >= min && Buffer.byteLength(value) <= 256;
@@ -331,7 +332,7 @@ export async function createSharingServer({ database, origin, staffPassphrase, t
         if (group === 'guest/tour' && !asset) return respond(res,200,viewer,'text/html; charset=utf-8');
         if (group === 'api/guest/tours' && asset === 'manifest') {
           const manifest = sql('SELECT manifest FROM apartments WHERE id=?',apartment);
-          return respond(res,200,JSON.parse(manifest.manifest));
+          return respond(res,200,visitorManifest(JSON.parse(manifest.manifest)));
         }
         if (group === 'api/guest/tours' && (room || asset === 'thumbnail')) {
           const photo = sql('SELECT jpeg FROM photos WHERE apartment_id=? AND room=?',apartment,room ?? sql('SELECT start_room FROM apartments WHERE id=?',apartment).start_room);

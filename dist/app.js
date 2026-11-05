@@ -81,6 +81,7 @@ async function openRoom(id, { focus = false, force = false, position } = {}) {
         if (editor?.editing) editor.selectDoor(index, true);
         else openRoom(target.id, { focus: true });
       });
+      if(editor?.editing)editor.bindDoorDrag?.(button,index,target);
       // Marzipano owns the anchor's transform; centre the inner button separately.
       const anchor = document.createElement('div'); anchor.append(button);
       nextScene.hotspotContainer().createHotspot(anchor, { yaw: link.yaw, pitch: link.pitch });
@@ -216,11 +217,12 @@ async function init() {
     if (document.body.dataset.guided === 'true') {
       const { createGuidedEditor } = await import('./guided-editor.js');
       editor = await createGuidedEditor({ showTour, openRoom, currentRoom: () => state.room,
+        pausePanning: paused => paused ? state.viewer.controls().disable() : state.viewer.controls().enable(),
         coordinatesAt: event => {
           if (!state.scene || state.busy) throw new Error('Wait for the panorama to open.');
           state.viewer.updateSize();
           const rect = $('pano').getBoundingClientRect();
-          const point = state.scene.view().screenToCoordinates(event.detail === 0 ? {x: $('pano').clientWidth/2,y: $('pano').clientHeight/2}
+          const point = state.scene.view().screenToCoordinates(event.type==='click'&&event.detail === 0 ? {x: $('pano').clientWidth/2,y: $('pano').clientHeight/2}
             : {x:(event.clientX-rect.left)*$('pano').clientWidth/rect.width,y:(event.clientY-rect.top)*$('pano').clientHeight/rect.height});
           if(!Number.isFinite(point.yaw)||!Number.isFinite(point.pitch))throw new Error('Wait for the panorama to finish sizing, then tap the doorway again.');
           return point;

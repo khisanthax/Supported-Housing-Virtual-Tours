@@ -74,6 +74,7 @@ export function addConnection(tour, from, target, point) {
   if (tour.grid) {
     const key = edgeKey(from.id, target);
     if (!tour.grid.manual.includes(key)) tour.grid.manual.push(key);
+    if(tour.grid.inferred)tour.grid.inferred=tour.grid.inferred.filter(k=>k!==key);
     tour.grid.blocked = tour.grid.blocked.filter(k => k !== key);
   }
   const used = new Set(tour.rooms.flatMap(room => room.links.map(link => link.pairId)));
@@ -103,8 +104,9 @@ export function retargetConnection(tour, from, index, target) {
   if (from.links.some((item, position) => position !== index && item.target === target)) throw new Error('These rooms already have a connection. Edit that doorway instead.');
   if (tour.grid) {
     const old = edgeKey(from.id, link.target), next = edgeKey(from.id, target);
-    tour.grid.manual = tour.grid.manual.filter(k => k !== old);
-    if (!tour.grid.blocked.includes(old)) tour.grid.blocked.push(old);
+    const remains=from.links.some((l,i)=>i!==index&&l.target===link.target);
+    if(!remains){tour.grid.manual = tour.grid.manual.filter(k => k !== old);if (!tour.grid.blocked.includes(old)) tour.grid.blocked.push(old);}
+    if(tour.grid.inferred)tour.grid.inferred=tour.grid.inferred.filter(k=>k!==next&&(remains||k!==old));
     if (!tour.grid.manual.includes(next)) tour.grid.manual.push(next);
     tour.grid.blocked = tour.grid.blocked.filter(k => k !== next);
   }
@@ -127,7 +129,7 @@ export function retargetConnection(tour, from, index, target) {
 export function removeConnection(tour, from, index) {
   if (tour.grid) {
     const key = edgeKey(from.id, from.links[index].target);
-    if (!tour.grid.blocked.includes(key)) tour.grid.blocked.push(key);
+    if (from.links.filter(l=>l.target===from.links[index].target).length===1&&!tour.grid.blocked.includes(key)) tour.grid.blocked.push(key);
   }
   const reverse = pairedArrow(tour, from.links[index]);
   if (reverse) reverse.room.links.splice(reverse.index, 1);

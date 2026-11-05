@@ -9,6 +9,7 @@ export function gridFor(tour) {
   const valid = key => key.split('|').length === 2 && key.split('|').every(id => ids.has(id));
   grid.manual = grid.manual.filter(valid);
   grid.blocked = grid.blocked.filter(valid);
+  if(grid.inferred!==undefined)grid.inferred=grid.inferred.filter(valid);
   for (const room of tour.rooms) if (!Object.hasOwn(grid.positions, room.id)) {
     if (tour.builder?.unplaced.includes(room.id)) continue;
     // Spaced initial tiles never infer doors merely from the upload order.
@@ -66,6 +67,7 @@ export function manualGridConnection(tour, a, b) {
   const key = edgeKey(a, b);
   if (a === b || ![a, b].every(id => tour.rooms.some(r => r.id === id))) throw new Error('Choose two different rooms.');
   if (!tour.grid.manual.includes(key)) tour.grid.manual.push(key);
+  if(tour.grid.inferred)tour.grid.inferred=tour.grid.inferred.filter(k=>k!==key);
   tour.grid.blocked = tour.grid.blocked.filter(k => k !== key);
   return reconcileGrid(tour);
 }
@@ -86,7 +88,8 @@ export function validateGrid(tour) {
     if (!ids.has(id) || tour.builder?.unplaced.includes(id) || !p || !Number.isInteger(p.x) || !Number.isInteger(p.y) || p.x < 0 || p.y < 0 || p.x >= GRID_SIZE || p.y >= GRID_SIZE || cells.has(p.x + ',' + p.y)) throw new Error('Grid cells must be unique and inside the layout.');
     cells.add(p.x + ',' + p.y);
   }
-  for (const list of [g.manual, g.blocked]) if (!Array.isArray(list) || list.length > 66 || new Set(list).size !== list.length || list.some(key => typeof key !== 'string' || key.length > 129 || key.split('|').length !== 2 || key.split('|')[0] === key.split('|')[1] || !key.split('|').every(id => ids.has(id)) || edgeKey(...key.split('|')) !== key)) throw new Error('Invalid grid connection.');
+  for (const list of [g.manual, g.blocked, g.inferred===undefined?[]:g.inferred]) if (!Array.isArray(list) || list.length > 66 || new Set(list).size !== list.length || list.some(key => typeof key !== 'string' || key.length > 129 || key.split('|').length !== 2 || key.split('|')[0] === key.split('|')[1] || !key.split('|').every(id => ids.has(id)) || edgeKey(...key.split('|')) !== key)) throw new Error('Invalid grid connection.');
+  if(g.inferred?.some(key=>!g.manual.includes(key)))throw new Error('Retained grid edges must exist in the layout.');
   const enabled = new Set(gridEdges(tour).filter(e => e.enabled).map(e => e.key));
   for (const r of tour.rooms) for (const l of r.links) if (!enabled.has(edgeKey(r.id, l.target))) throw new Error('Room arrows disagree with the grid.');
   for (const e of gridEdges(tour).filter(e => e.enabled)) if (!e.a.links.some(l => l.target === e.b.id) || !e.b.links.some(l => l.target === e.a.id)) throw new Error('Grid connections require two-way arrows.');

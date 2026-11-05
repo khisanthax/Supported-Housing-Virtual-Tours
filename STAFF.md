@@ -30,7 +30,7 @@ The script copies the passphrase to the clipboard from a DPAPI-encrypted file un
 2. In **1. Upload Photos**, choose **ADD STITCH** for one or multiple stitched JPEGs or a ZIP. Review previews and suggested names; add a viewpoint, skip it or replace an existing one. **Upload and save draft** shows progress and **Retry save** after failure. All photos remain in the left filmstrip, including Unplaced ones.
 3. **ADD ROOM** names a room and attaches an existing stitch or uploads a new one. Without a stitch it stays incomplete. Reuse a room name to group viewpoints; give each viewpoint a distinct label.
 4. In **2. Arrange Rooms**, drag photos onto empty cells or select a photo and tap a cell. Name viewpoints directly on their tiles. Select a tile to highlight its photo. Fit, zoom, keyboard arrows and Column/Row controls provide alternatives.
-5. In **3. Place Doorways**, choose each direction marked **Needs position**, pan to its real doorway and tap it. Repeat for the return. Positioned directions can be moved; destinations and two-way arrows can be changed or deleted. Choose the starting viewpoint.
+5. In **3. Place Doorways**, pan to a doorway and drag its destination room handle from the strip onto it. A click on a room name still switches rooms. The outgoing arrow saves immediately and its reciprocal stays **Needs position** until placed in the destination panorama. Drag an existing arrow to reposition it. On touch or keyboard, select a handle then tap the doorway, or press Enter to place at the current view centre. Escape or Cancel placement exits this mode. Choose the starting viewpoint.
 6. In **4. Preview & Publish**, explore every room and both directions. Incomplete rooms, unplaced photos and missing arrow positions block publication. Changes automatically save to a private cloud draft. Reopen **Edit** from another device to check persistence; after a conflict, reload the latest draft before editing.
 7. Choose **Publish apartment** explicitly, or **Publish latest draft** in the Gallery. Allow about a minute for new KV images. Guests keep the previous publication until then. **Unpublish** withdraws guest access immediately. **Remove** hides an apartment from staff and guests; export a backup first.
 
@@ -46,11 +46,29 @@ Tiles sharing an edge create a suggested two-way connection. A shared wall does 
 
 Right-click a filmstrip photo or tap **⋯** for **Replace Stitch**, **Rename Viewpoint**, **Remove from Grid** or **Delete Stitch**. Replacement validates and previews the JPEG, preserving viewpoint identity, layout, connections and arrow angles. Review arrows if the camera orientation changed. Removing from Grid returns the photo to Unplaced and retains its links. Delete requires confirmation and removes that viewpoint and inbound arrows from the private draft. Guests keep their published version.
 
-The grid chooses **which** rooms connect. Each direction below it shows **Needs position** or **Positioned**. Choose a direction to open that panorama, then tap its actual doorway. Repeat in the destination panorama for the return. New connections have no guessed coordinates, and publication is rejected until every arrow is positioned. Visitor preview hides pending arrows and warns about them.
+The grid suggests **which** rooms connect; dropping a destination handle can also create a manual connection directly. Each direction below it shows **Needs position** or **Positioned**. Choose a direction to open that panorama, then tap its actual doorway. Repeat in the destination panorama for the return. New connections have no guessed coordinates, and publication is rejected until every arrow is positioned. Visitor preview hides pending arrows and warns about them.
 
 Layout, manual links, disabled edges and arrow positions save with the versioned cloud draft and travel in `.shtour` backups. Earlier tours and packages without a grid still work. These edits do not change a live guest publication until **Publish latest draft** is chosen. Offline downloads use the latest complete staff draft and retain their existing access restrictions.
 
 The Gallery groups historical Willow/Maple/Cedar synthetic copies under the latest saved record in each family. **Show all saved synthetic demo records** reveals every older record. This display setting never changes stored tours or guest permissions.
+
+## Reset Layout and Undo
+
+New apartments have an empty grid. New JPEG/ZIP stitches appear only in the filmstrip as **Unplaced** until staff arrange them. Opening an existing apartment never resets its saved layout. Importing a complete .shtour backup restores its saved layout.
+
+**Reset Layout** is visible beside Undo and requires confirmation. It affects only the current private apartment: every viewpoint becomes Unplaced, grid coordinates and inferred connections are cleared, and uploaded JPEGs, names and IDs remain. Explicit manual doorways stay attached to their viewpoints. Older connections already recorded as manual are retained conservatively. Guests keep the previous publication.
+
+**Undo** reverses up to 20 recent placements, moves, connector changes and doorway edits in the current editor session, saving each reversal as a new cloud revision. Reset supports immediate Undo. After a refresh, recent-action Undo is empty; **Restore Reset Checkpoint** restores the first pre-reset layout and navigation stored separately in the D1-backed draft. Later moves, saves and resets never overwrite this checkpoint. JPEG replacements and names remain current. If viewpoints were added or deleted, use the complete backup when the checkpoint no longer matches their IDs.
+
+Export a complete .shtour before substantial changes. Packages retain the checkpoint as well as the current layout and original JPEGs. The checkpoint contains layout/navigation only, not another image copy. It is staff-only metadata and is excluded from guest manifests. Both reset and restore retain stale-save protection.
+
+## Direct room-to-doorway placement
+
+Drag the visible **⠿** handle on a room chip onto the actual doorway in the current panorama. Mouse users can also drag the room button. The panorama highlights during the drag and a temporary arrow follows the pointer; dragging a handle suppresses panorama panning. Touch the room-name portion to scroll the strip horizontally or tap it to open that viewpoint. The room strip stays beneath the panorama while editing.
+
+A default drop positions the existing pending doorway to that viewpoint, or repositions its existing arrow. When no connection exists it creates a two-way manual connection; the reverse has no guessed coordinates. Open the destination and drag the original room handle to its return doorway. To intentionally add a second door to the same viewpoint, enable **New doorway to the same viewpoint** before dropping. Each paired door can be edited or removed independently. A viewpoint cannot link to itself; separate viewpoints with the same name remain distinct.
+
+Undo reverses accidental drops. Saving preserves keyboard focus, and the status area announces outcomes. These controls appear only in authenticated staff Place Doorways mode. Guest, preview and offline room buttons remain navigation-only.
 
 ## Send an invitation
 
