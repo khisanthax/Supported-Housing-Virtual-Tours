@@ -25,7 +25,7 @@ export async function reviewBatch(files, existing, verify, save) {
     }
   }
   const known = new Map();
-  for (const room of existing.tour.rooms) known.set(await digest(existing.images.get(room.id)), room.name);
+  for (const room of existing.tour.rooms) if(existing.images.has(room.id)) known.set(await digest(existing.images.get(room.id)), room.name);
   const dialog = element('dialog');
   dialog.className = 'name-rooms batch-review';
   const title = element('h2', 'Review stitched panoramas');

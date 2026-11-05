@@ -17,6 +17,7 @@ export async function exportApartment(apartment) {
   const tour=await response.json();
   const images=new Map();
   for (const room of tour.rooms) {
+    if(tour.builder?.missing.includes(room.id)) continue;
     const photo=await get('images/'+room.id+'?version='+version);
     images.set(room.id,await photo.blob());
   }

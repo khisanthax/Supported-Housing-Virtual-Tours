@@ -220,7 +220,8 @@ async function route(request,env,privateStaffOnly) {
     return output({ok:true},200,setCookie(name,token,Math.ceil((expires-now)/1000),url.protocol==='https:'));
   }
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
-  if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/staff.html':'/sharing/staff-login.html');
+  if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
+  if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); return asset('/sharing/staff.html'); }
   if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});
   if (method==='GET' && (path==='/staff/accounts' || path==='/sharing/staff-accounts.js')) {
     const account=await staff();
@@ -233,15 +234,16 @@ async function route(request,env,privateStaffOnly) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
-  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|vendor\/marzipano\.js)?$/.test(path)) {
+  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|vendor\/marzipano\.js)?$/.test(path)) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
+  if (method==='GET' && path==='/sharing/gallery.js') { await requireStaff(); return asset(path); }
   if (method==='GET' && (/^\/sharing\/(staff|worker-import)\.js$/.test(path) || path.startsWith('/staff/editor/'))) {
     await requireStaff();
-    return asset(path==='/staff/editor/' ? path+'index.html' : path);
+    return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
   }
-  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|vendor\/marzipano\.js)$/.test(path)) {
+  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|vendor\/marzipano\.js)$/.test(path)) {
     await requireGuest();
     return asset(path);
   }
@@ -398,6 +400,9 @@ async function route(request,env,privateStaffOnly) {
       const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,
         (SELECT SUM(p.bytes) FROM json_each(v.photos) j JOIN photos p ON p.id=j.value) AS bytes
         FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
+        AND json_array_length(v.manifest,'$.rooms')>0
+        AND COALESCE(json_array_length(v.manifest,'$.builder.unplaced'),0)=0 AND COALESCE(json_array_length(v.manifest,'$.builder.missing'),0)=0
+        AND NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.rooms') r,json_each(r.value,'$.links') l WHERE json_extract(l.value,'$.pending')=1)
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.title`);
       return output({apartments,now});
@@ -410,6 +415,7 @@ async function route(request,env,privateStaffOnly) {
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.seq DESC LIMIT 1`,apartment);
       if (!version) fail(404,'Offline tour not found.');
+      try { const tour=validateApartment(JSON.parse(version.manifest)); if(tour.rooms.some(r=>r.links.some(l=>l.pending)))throw Error('Unpositioned doorway.'); } catch(error) { fail(409,'Finish this apartment before downloading it offline.'); }
       const revision=String(version.seq);
       if (room) {
         if (url.searchParams.get('revision')!==revision) fail(409,'The apartment changed. Download the new version.');
@@ -443,10 +449,11 @@ async function route(request,env,privateStaffOnly) {
     }
     if (method==='POST' && path==='/api/staff/apartments') {
       const {tour,photos,replacement,expectedVersion}=await json(request);
-      try { validateApartment(tour); } catch (error) { fail(400,error.message); }
+      try { validateApartment(tour,{draft:true}); } catch (error) { fail(400,error.message); }
       if (tour.rooms.length>MAX_ROOMS) fail(400,'Tour is too large.');
-      if (!photos || Object.keys(photos).length!==tour.rooms.length ||
-          tour.rooms.some(room=>typeof photos[room.id]!=='string' || !idPattern.test(photos[room.id]))) fail(400,'One uploaded JPEG is required per room.');
+      const complete= tour.rooms.filter(room=>!tour.builder?.missing.includes(room.id));
+      if (!photos || Object.keys(photos).length!==complete.length ||
+          complete.some(room=>typeof photos[room.id]!=='string' || !idPattern.test(photos[room.id]))) fail(400,'One uploaded JPEG is required per complete viewpoint.');
       const ids=[...new Set(Object.values(photos))];
       if (replacement && !idPattern.test(replacement)) fail(400,'Invalid apartment.');
       const apartment=replacement || id();
@@ -458,7 +465,7 @@ async function route(request,env,privateStaffOnly) {
         const saved=await run(`INSERT INTO versions SELECT ?,?,?,?,?,?
           WHERE NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))
           AND COALESCE((SELECT MAX(seq) FROM versions WHERE apartment=?),0)=?
-          AND (SELECT COUNT(*) FROM photos WHERE ready=1 AND id IN (${ids.map(()=>'?').join(',')}))=?`,
+          AND (SELECT COUNT(*) FROM photos WHERE ready=1 AND id IN (${ids.map(()=>'?').join(',')||'NULL'}))=?`,
           apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,apartment,prior,...ids,ids.length);
         if (!saved.meta.changes) fail(409,'Apartment or uploads changed. Reload and try again.');
       } catch(error) { if (error.message.includes('UNIQUE')) fail(409,'This apartment changed. Refresh and try again.'); throw error; }
@@ -477,6 +484,7 @@ async function route(request,env,privateStaffOnly) {
       const guard='?=(SELECT MAX(seq) FROM versions WHERE apartment=?) AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))';
       const args=[latest.seq,apartment,apartment];
       if (action==='publish') {
+        try { validateApartment(JSON.parse(latest.manifest)); } catch(error) { fail(400,error.message); }
         if (JSON.parse(latest.manifest).rooms.some(room=>room.links.some(link=>link.pending))) fail(400,'Position every return arrow before publishing.');
         const result=await db.batch([
           stmt(`UPDATE versions SET available=? WHERE apartment=? AND seq<>? AND ${guard}
@@ -499,6 +507,7 @@ async function route(request,env,privateStaffOnly) {
     if (method==='GET' && staffTour) {
       if (await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=2',staffTour[1])) fail(404,'Tour not found.');
       const version=await current(staffTour[1]);
+      if(staffTour[2]==='thumbnail'&&(!version||!JSON.parse(version.photos)[JSON.parse(version.manifest).startRoom]))fail(404,'No starting-room image yet.');
       if (url.searchParams.has('version') && String(version?.seq)!==url.searchParams.get('version')) fail(409,'Tour changed. Export again.');
       return tourAsset(version,staffTour[2]==='thumbnail'?JSON.parse(version.manifest).startRoom:staffTour[3],env);
     }
@@ -537,7 +546,8 @@ async function route(request,env,privateStaffOnly) {
       return output({versions:pruned.meta.changes,photos:deleted});
     }
     if (method==='GET' && path==='/api/staff/dashboard') {
-      const apartments=await all(`SELECT v.apartment AS id,v.title,v.seq AS version,v.available,
+      const apartments=await all(`SELECT v.apartment AS id,v.title,v.seq AS version,v.available,v.rowid AS recent,json_array_length(v.manifest,'$.rooms') AS viewpoints,
+        (SELECT COUNT(DISTINCT COALESCE(json_extract(r.value,'$.roomName'),json_extract(r.value,'$.name'))) FROM json_each(v.manifest,'$.rooms') r) AS roomCount,
         EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state=3) AS archived,
         NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment)
           AND EXISTS(SELECT 1 FROM versions p WHERE p.apartment=v.apartment AND p.available<?) AS published

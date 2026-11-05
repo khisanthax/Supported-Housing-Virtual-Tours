@@ -10,7 +10,7 @@ GitHub main at `c3e3ca7` already contained PRs #5 and #6. The canonical reposito
 
 | Area | Actual evidence |
 | --- | --- |
-| Regression | 31 Node tests pass, including password policy, roles, revocation, ZIP safety, private sharing, backups, offline encryption, grid validation and incomplete-publication rejection. |
+| Regression | 36 Node tests pass, including password policy, roles, revocation, ZIP safety, private sharing, backups, offline encryption, grid validation and incomplete-publication rejection. |
 | Room grid and gallery | Six uploaded synthetic JPEGs produce thumbnail tiles. Mouse and CDP touch drags snap to cells; adjacency, connector removal/restoration and nonadjacent manual links pass. Both panorama arrows are placed explicitly; incomplete publishing is rejected and complete publishing succeeds. Reload, independent Edge, `.shtour` import/export, folded/unfolded viewports and protected gallery thumbnails pass locally and live. Physical Fold testing remains separate. |
 | Hosted editor | Desktop Chromium and independent Edge at a mobile viewport: image previews, retry after injected upload failure, reciprocal arrows, reload, cross-browser draft persistence, photo replacement retaining links, stale-save rejection and logout. |
 | ZIP import | Local Worker, six synthetic stitched JPEGs: filename suggestions, six previews, retry, room import and cross-browser replacement. |
@@ -18,13 +18,31 @@ GitHub main at `c3e3ca7` already contained PRs #5 and #6. The canonical reposito
 | Hosted offline | Isolated 390-pixel touch profile: encrypted download, browser-process restart with networking disabled, every sphere and doorway, reconnect update detection, verified replacement, archive lock, restore unpublished and local removal. Repeated successfully after deployment. |
 | Capacity | Live D1/KV: 25 drafts with seven viewpoints each, 175 distinct synthetic JPEGs, 39,202,975 image bytes. Disposable drafts removed; immutable images retain the 24-hour orphan cleanup grace. This exercises persistence, not sustained simultaneous editing by 25 people. |
 | Staff recovery | Synthetic Administrator and Editor: write authorization, account-administration denial, password reset, rejected old password, disabling and session revocation. Operator recovery updated a disposable Administrator in live D1, accepted the new password and rejected its old session. Test accounts left disabled. |
-| Hosted code | Deployed module SHA-256 equals the local dry-run bundle. All 47 generated static files returned identical bytes through their authenticated or public application routes after the grid/Gallery deployment. |
+| Hosted code | Deployed module SHA-256 equals the local dry-run bundle. All 55 generated static files returned identical bytes through their authenticated or public application routes after the grid/Gallery deployment. |
 | Backup recovery | Hosted catalog export, disposable original removal, import as a new private apartment, complete manifest/JPEG byte equality and independent Edge retrieval passed. Replacing a published synthetic fixture from a different backup changed only its draft; guests retained the prior publication. |
 | Offline failure safety | Wrong vault passphrase was denied. An injected JPEG download failure and a simulated full storage quota each kept the previous complete encrypted revision. Retry succeeded. Advancing the isolated browser clock beyond the maximum offline lifetime hid expired tour access. |
 
 The pilot still uses individual passwords and private scrypt Durable Objects. Firebase remains dormant rollback configuration. No cryptographic costs were reduced.
 
-## Live CPU and quota observations
+## Guided-editor release evidence
+
+The deployed synthetic pilot now lands in the Apartment Gallery and creates genuinely blank apartments. The live browser probe passed five-image upload, filmstrip/grid placement, inline names, connector removal/restoration, explicit manual connections, an off-centre panorama tap, reciprocal arrow placement, context-menu replacement retaining the full manifest, unplacing without losing links, another stitch, an incomplete room and later attachment, mouse/CDP touch/keyboard movement, reload and independent Edge retrieval, backup round-trip, explicit publication and scoped guest viewing. Replacing a published photo changed only the draft; the guest JPEG stayed byte-identical.
+
+A second live folded-touch probe passed Add Room with a new JPEG, attaching an existing stitch, room grouping, rename, canceled and confirmed deletion through the last viewpoint, empty-draft reload, logout and denied post-logout API access. The Gallery check decoded protected thumbnails, revealed all historical records and verified Share preselection. The guided apartment passed the encrypted offline restart, every sphere/doorway, update detection, interrupted-download preservation, low storage, archive, expiry and removal rehearsal. Local legacy-editor and remove/restore-backup browser probes also passed.
+
+There are 12 historical records across the three exact Synthetic Willow/Maple/Cedar families, plus two pre-existing private drafts titled The Willow Apartment. The Gallery groups those 12 into three cards and leaves the two legacy drafts visible. Show all reveals all 14 records. A private before/after comparison confirmed all 12 family manifests, JPEG references, versions and visibility unchanged. No demos were seeded or destroyed.
+
+[Actual application screenshots](docs/EDITOR-SCREENSHOTS.md) show the Gallery, empty draft, uploads, desktop grid, doorway stage, preview and folded/unfolded viewports. No Android device was attached to ADB. These screenshots and browser touch emulation do not establish physical Fold acceptance.
+
+## Current live CPU observations
+
+The guided deployment trace captured 335 events: no runtime exception or CPU/memory-limit termination; one guest thumbnail request was canceled by browser navigation. Captured public-request maxima were sign-in 4 ms (11 samples), dashboard 4 ms (15), draft save 8 ms (21), draft read 10 ms (27), JPEG upload 11 ms (15), share creation 20 ms (9), guest unlock 16 ms (7), offline manifest 3 ms (2) and offline JPEG 3 ms (9). Eight additional phrase creation/unlock/catalog/revocation cycles and three uploads returned expected results. Tail did not capture every request or establish isolate coldness.
+
+**Strict 10 ms headroom is not verified.** Successful requests included intermittent samples above the nominal Free limit; this is the [Issue #12](https://github.com/khisanthax/Supported-Housing-Virtual-Tours/issues/12) reliability follow-up before real-content release, not a passed CPU gate. Cloudflare documents occasional isolate flexibility, which must not be treated as guaranteed capacity. No weaker cryptography or paid plan was introduced. [Cloudflare CPU limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time).
+
+A read-only storage sample at 19:37 UTC showed 284 photo reservations totaling 72,187,165 bytes and D1 storage of 507,904 bytes. These include retained revisions and orphan grace-period reservations; they are not account-wide daily operation totals. Existing Workers Free bindings were preserved, with no new resource or billing changes. The earlier same-day Free dashboard confirmation below remains the plan evidence.
+
+## Earlier live CPU and quota observations
 
 After deployment, two sequential and four concurrent correct sign-ins and one incorrect password returned the expected outcomes. Tail captured all seven public login events and their seven coordination and seven scrypt events. Successful public login maximum was 2 ms; coordination maximum 8 ms; scrypt maximum 317 ms (concurrent maximum 204 ms). Six dashboard checks, six logouts and six rejected post-logout checks all passed. Tail captured only three public dashboard events (maximum 0 ms), two logout events (3 ms) and two rejected dashboard events (1 ms); those incomplete samples do not establish their worst case. There were no runtime errors in 285 captured events at that point. Isolate coldness and native memory peaks were not established. Earlier 32-concurrent-login acceptance remains recorded in LOGBOOK.md.
 

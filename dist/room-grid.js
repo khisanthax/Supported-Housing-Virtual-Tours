@@ -10,6 +10,7 @@ export function gridFor(tour) {
   grid.manual = grid.manual.filter(valid);
   grid.blocked = grid.blocked.filter(valid);
   for (const room of tour.rooms) if (!Object.hasOwn(grid.positions, room.id)) {
+    if (tour.builder?.unplaced.includes(room.id)) continue;
     // Spaced initial tiles never infer doors merely from the upload order.
     for (let i = 0; i < 64; i++) {
       const columns = Math.min(4, Math.ceil(Math.sqrt(tour.rooms.length)));
@@ -26,7 +27,7 @@ export function gridEdges(tour) {
   for (let i = 0; i < tour.rooms.length; i++) for (let j = i + 1; j < tour.rooms.length; j++) {
     const a = tour.rooms[i], b = tour.rooms[j], key = edgeKey(a.id, b.id);
     const p = grid.positions[a.id], q = grid.positions[b.id];
-    const adjacent = Math.abs(p.x - q.x) + Math.abs(p.y - q.y) === 1;
+    const adjacent = !!p && !!q && Math.abs(p.x - q.x) + Math.abs(p.y - q.y) === 1;
     if (adjacent || grid.manual.includes(key)) edges.push({ a, b, key, adjacent, enabled: !grid.blocked.includes(key) });
   }
   return edges;
@@ -56,6 +57,7 @@ export function moveGridRoom(tour, id, x, y) {
   tour.grid = gridFor(tour);
   if (Object.entries(tour.grid.positions).some(([other, p]) => other !== id && p.x === x && p.y === y)) throw new Error('That grid cell is occupied. Move to an empty cell.');
   tour.grid.positions[id] = { x, y };
+  if (tour.builder) tour.builder.unplaced = tour.builder.unplaced.filter(room => room !== id);
   return reconcileGrid(tour);
 }
 
@@ -78,10 +80,10 @@ export function toggleGridConnection(tour, key) {
 export function validateGrid(tour) {
   if (tour.grid === undefined) return;
   const g = tour.grid, ids = new Set(tour.rooms.map(r => r.id));
-  if (ids.size > 12 || !g || g.version !== 1 || !g.positions || Array.isArray(g.positions) || Object.keys(g.positions).length !== ids.size) throw new Error('Invalid room grid.');
+  if (ids.size > 12 || !g || ![1,2].includes(g.version) || !g.positions || Array.isArray(g.positions) || Object.keys(g.positions).length !== ids.size - (tour.builder?.unplaced.length ?? 0)) throw new Error('Invalid room grid.');
   const cells = new Set();
   for (const [id, p] of Object.entries(g.positions)) {
-    if (!ids.has(id) || !p || !Number.isInteger(p.x) || !Number.isInteger(p.y) || p.x < 0 || p.y < 0 || p.x >= GRID_SIZE || p.y >= GRID_SIZE || cells.has(p.x + ',' + p.y)) throw new Error('Grid cells must be unique and inside the layout.');
+    if (!ids.has(id) || tour.builder?.unplaced.includes(id) || !p || !Number.isInteger(p.x) || !Number.isInteger(p.y) || p.x < 0 || p.y < 0 || p.x >= GRID_SIZE || p.y >= GRID_SIZE || cells.has(p.x + ',' + p.y)) throw new Error('Grid cells must be unique and inside the layout.');
     cells.add(p.x + ',' + p.y);
   }
   for (const list of [g.manual, g.blocked]) if (!Array.isArray(list) || list.length > 66 || new Set(list).size !== list.length || list.some(key => typeof key !== 'string' || key.length > 129 || key.split('|').length !== 2 || key.split('|')[0] === key.split('|')[1] || !key.split('|').every(id => ids.has(id)) || edgeKey(...key.split('|')) !== key)) throw new Error('Invalid grid connection.');

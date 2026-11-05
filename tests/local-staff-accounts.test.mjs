@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import worker, { StaffLogin } from '../cloudflare/worker.mjs';
 import { hashStaffPassword } from '../cloudflare/staff-password.mjs';
 import { moveGridRoom } from '../dist/room-grid.js';
+import { blankApartment, addIncompleteRoom } from '../dist/builder-data.js';
 
 const origin = 'https://synthetic-test.workers.dev';
 const adminPassword = 'Synthetic administrator password';
@@ -119,6 +120,20 @@ test('cloud grid drafts reject incomplete publication and thumbnails require cur
   assert.equal((await request('/api/staff/apartments',{method:'POST',cookie:admin,body:{tour:invalid,photos}})).status,400);
   database.prepare("UPDATE staff_accounts SET disabled=1 WHERE username='admin'").run();
   assert.equal((await request(thumb,{cookie:admin})).status,401);
+});
+
+test('blank and incomplete cloud apartments survive reload and remain excluded from publication and offline download',async t=>{
+ const {database,request,signIn}=await fixture(t);
+ database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');
+ const admin=session(await signIn('admin',adminPassword));const tour=blankApartment('Synthetic empty apartment');
+ const response=await request('/api/staff/apartments',{method:'POST',cookie:admin,body:{tour,photos:{}}});assert.equal(response.status,201);
+ const {id,version}=await response.json();assert.equal((await(await request('/api/staff/drafts/'+id,{cookie:admin})).json()).tour.rooms.length,0);
+ assert.equal((await request('/api/staff/apartments/'+id,{method:'PATCH',cookie:admin,body:{action:'publish',expectedVersion:version}})).status,400);
+ assert.equal((await request('/api/staff/tours/'+id+'/thumbnail',{cookie:admin})).status,404);
+ addIncompleteRoom(tour,'Kitchen');
+ const saved=await request('/api/staff/apartments',{method:'POST',cookie:admin,body:{tour,photos:{},replacement:id,expectedVersion:version}});assert.equal(saved.status,201);
+ const catalog=await(await request('/api/staff/offline',{cookie:admin})).json();assert.equal(catalog.apartments.some(a=>a.id===id),false);
+ assert.equal((await request('/api/staff/offline/'+id+'/manifest',{cookie:admin})).status,409);
 });
 
 test('local staff accounts use private password operations and revoke sessions on reset, disable, expiry and logout', async t => {

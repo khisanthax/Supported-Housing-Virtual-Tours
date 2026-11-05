@@ -11,7 +11,7 @@ async function request(path, options) {
 export async function loadDraft() {
   if (!apartment) return null;
   const { tour, photos, revision } = await (await request('drafts/' + apartment)).json();
-  const images = new Map(await Promise.all(tour.rooms.map(async room => [
+  const images = new Map(await Promise.all(tour.rooms.filter(r=>Object.hasOwn(photos,r.id)).map(async room => [
     room.id,
     await (await request(`tours/${apartment}/images/${room.id}?version=${revision}`)).blob()
   ])));
@@ -45,6 +45,6 @@ export async function saveDraft({ tour, images }, revision, progress = () => {})
   const result = await response.json();
   apartment = result.id;
   savedPhotos = uploaded;
-  history.replaceState(null, '', '?apartment=' + apartment);
+  history.replaceState(null, '', '?apartment=' + apartment + (new URLSearchParams(location.search).has('legacy') ? '&legacy=1' : ''));
   return result.version;
 }

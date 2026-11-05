@@ -19,11 +19,11 @@ try {
     }
     await page.locator('input[name=passphrase]').fill(passphrase);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
-    await page.getByRole('link',{name:'Start an apartment'}).waitFor();
+    await page.getByRole('link',{name:/NEW APARTMENT/}).waitFor();
     return page;
   }
   page = await signIn(desktop,false);
-  await page.getByRole('link',{name:'Start an apartment'}).click();
+  await page.goto(origin+'/staff/editor/?legacy=1');
   async function openEditor(page, mobile=false) {
     await page.waitForFunction(()=>document.querySelector('#announcement')?.textContent.includes('opened') ||
       document.querySelector('#error')?.hidden === false);
@@ -75,7 +75,7 @@ try {
   assert.equal(await page.locator('#draft-title').inputValue(),title);
   const mobile = await signIn(second,true);
   const item=mobile.locator('#catalog li').filter({hasText:title});
-  await item.getByRole('link',{name:'Edit draft'}).tap();
+  await mobile.goto(origin+'/staff/editor/?legacy=1&apartment='+id);
   await openEditor(mobile,true);
   await mobile.locator('#draft-title').waitFor();
   assert.equal(await mobile.locator('#draft-title').inputValue(),title);

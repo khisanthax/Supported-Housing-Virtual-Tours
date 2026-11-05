@@ -36,7 +36,7 @@ try {
   await control.getByRole('button', { name: 'Sign in', exact: true }).click();
   await control.getByRole('link', { name: 'Available Offline' }).waitFor();
   const dashboard = await api('dashboard');
-  const source = dashboard.apartments.find(item => /^Synthetic /.test(item.title) && !item.archived);
+  const source = dashboard.apartments.find(item => process.env.PILOT_OFFLINE_SOURCE ? item.id===process.env.PILOT_OFFLINE_SOURCE : /^Synthetic /.test(item.title) && !item.archived);
   assert.ok(source, 'An existing synthetic tour is required');
   ({ tour, photos } = await api('drafts/' + source.id));
   tour = { ...tour, title: 'Synthetic offline acceptance ' + Date.now() };
