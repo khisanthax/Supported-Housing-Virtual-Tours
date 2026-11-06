@@ -1,5 +1,7 @@
 # Development and deployment
 
+The current synthetic pilot uses `TOUR_API_BACKEND=durable-object` to dispatch staff/guest APIs and guest tour entry through the existing private SQLite-backed class, with D1/KV still authoritative. See [RELEASE.md](RELEASE.md) for CPU measurements, additional object quota consumption and recovery. Set this flag to `worker` to restore the prior API routing; retain the existing class/binding, secrets and tested previous deployment. Never roll back data to change routing. Redirect Wrangler D1 export output to a protected log because it may contain a temporary signed export URL.
+
 For local Worker testing, run these commands from the repository root in separate terminals as needed.
 
 ```powershell

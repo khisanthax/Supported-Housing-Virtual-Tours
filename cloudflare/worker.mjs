@@ -140,7 +140,16 @@ async function route(request,env,privateStaffOnly) {
   const accountList=passwordAccounts && method==='GET' && path==='/api/staff/accounts';
   const credentialMutation=passwordAccounts && path==='/api/staff/accounts' && ['POST','PATCH'].includes(method);
   const privateStaffRoute=namedLogin || staffDashboard || accountList || credentialMutation;
-  if (privateStaffOnly && !privateStaffRoute) fail(404,'Not found.');
+  const privateTourRoute=env.TOUR_API_BACKEND==='durable-object' &&
+    (/^\/api\/(staff|guest)\//.test(path) || /^\/guest\/tour\//.test(path));
+  if (privateStaffOnly && !privateStaffRoute && !privateTourRoute) fail(404,'Not found.');
+  if (!privateStaffOnly && privateTourRoute) {
+    if (!env.STAFF_LOGIN) fail(503,'Tour service is temporarily unavailable.');
+    const forwarded=new Request(request);
+    // Only ingress supplies this identity; callers cannot choose distributed rate buckets.
+    forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
+    return env.STAFF_LOGIN.getByName('tour-api-v1').fetch(forwarded);
+  }
   if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
     if (staffDashboard || accountList) {

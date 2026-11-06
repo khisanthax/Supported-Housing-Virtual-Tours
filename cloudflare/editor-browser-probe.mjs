@@ -136,8 +136,10 @@ try {
     assert.equal((await mobile.request.get(photo)).status(),401);
     assert.equal((await staffApi('apartments/'+id,'PATCH',{action:'remove',expectedVersion:replaced.revision})).status(),200);
     disposableId=null;
-    assert.equal((await staffApi('cleanup','POST')).status(),200);
-    console.log('PASS publish, two-apartment phrase sign-in at mobile viewport, guest isolation, unpublish, revoke, remove and cleanup');
+    // Maintenance prunes historical records across the entire database. Never run it on the hosted pilot.
+    if(new URL(origin).hostname==='localhost' || new URL(origin).hostname==='127.0.0.1')
+      assert.equal((await staffApi('cleanup','POST')).status(),200);
+    console.log('PASS publish, two-apartment phrase sign-in at mobile viewport, guest isolation, unpublish, revoke and disposable removal');
   }
 } finally {
   if (page && disposableShare) {
