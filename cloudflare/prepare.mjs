@@ -47,7 +47,7 @@ for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-da
 await put('staff/editor/legacy.html',await readFile(new URL('staff/editor/index.html',output)));
 let guidedIndex=await readFile(new URL('staff/editor/index.html',output),'utf8');
 await put('staff/editor/index.html',guidedIndex.replace('<body>','<body data-guided="true">').replace('</head>','<link rel="stylesheet" href="guided-editor.css"></head>'));
-for(const name of ['guided-editor.js','guided-editor.css','doorway-drag.js'])await copy('cloudflare/'+name,'staff/editor/'+name);
+for(const name of ['guided-editor.js','guided-editor.css','doorway-drag.js','upload-workspace.js'])await copy('cloudflare/'+name,'staff/editor/'+name);
 for (const name of ['living.jpg','kitchen.jpg','bedroom.jpg']) await copy('cloudflare/sample-images/'+name,'staff/editor/images/'+name);
 await copy('cloudflare/sample.json','staff/editor/data/apartment.json');
 for (const name of ['batch-review.js','batch-draft.js','panorama-zip.js']) await copy('cloudflare/'+name,'staff/editor/'+name);
