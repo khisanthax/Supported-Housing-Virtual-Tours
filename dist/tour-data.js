@@ -1,7 +1,9 @@
 import { validateGrid } from './room-grid.js';
 import { validateBuilder } from './builder-data.js';
 import { validateLayoutCheckpoint } from './layout-state.js';
+import { graphMode,publicationView } from './graph-tour.js';
 export function validateApartment(data, { draft = false } = {}) {
+  if(!draft&&graphMode(data))return validateApartment(publicationView(data));
   if (!data || typeof data.title !== 'string' || !data.title.trim() || !Array.isArray(data.rooms) || (!data.rooms.length && !(draft && data.builder))) throw new Error('Apartment needs a title and rooms.');
   const ids = new Set();
   for (const room of data.rooms) {

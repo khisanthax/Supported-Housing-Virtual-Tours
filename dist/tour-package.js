@@ -177,7 +177,7 @@ export function deleteRoom(draft, id) {
   tour.rooms = tour.rooms.filter(room => room.id !== id);
   for (const room of tour.rooms) room.links = room.links.filter(link => link.target !== id);
   if (tour.startRoom === id) tour.startRoom = tour.rooms[0]?.id ?? '';
-  if (tour.builder) for(const key of ['unplaced','missing']) tour.builder[key] = tour.builder[key].filter(room=>room!==id);
+  if (tour.builder) for(const key of ['unplaced','missing','excluded']) if(tour.builder[key])tour.builder[key] = tour.builder[key].filter(room=>room!==id);
   const images = new Map(draft.images);
   images.delete(id);
   if (tour.grid) reconcileGrid(tour);

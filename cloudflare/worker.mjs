@@ -5,6 +5,7 @@ import { hashStaffPassword, normalizeUsername, usernamePattern, validNewStaffPas
 import { inspectJpeg, MAX_ROOMS } from '../dist/tour-package.js';
 import { validateApartment } from '../dist/tour-data.js';
 import { visitorManifest } from '../dist/layout-state.js';
+import { publicationView } from '../dist/graph-tour.js';
 
 const idPattern = /^[a-f0-9]{32}$/;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -148,7 +149,7 @@ async function route(request,env,privateStaffOnly) {
     const forwarded=new Request(request);
     // Only ingress supplies this identity; callers cannot choose distributed rate buckets.
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    return env.STAFF_LOGIN.getByName('tour-api-v1').fetch(forwarded);
+    return env.STAFF_LOGIN.getByName('tour-api-v2').fetch(forwarded);
   }
   if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
@@ -244,7 +245,7 @@ async function route(request,env,privateStaffOnly) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
-  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|layout-state\.js|vendor\/marzipano\.js)?$/.test(path)) {
+  if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|graph-tour\.js|layout-state\.js|vendor\/marzipano\.js)?$/.test(path)) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
@@ -253,7 +254,7 @@ async function route(request,env,privateStaffOnly) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
   }
-  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|layout-state\.js|vendor\/marzipano\.js)$/.test(path)) {
+  if (method==='GET' && /^\/viewer\/(styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|graph-tour\.js|layout-state\.js|vendor\/marzipano\.js)$/.test(path)) {
     await requireGuest();
     return asset(path);
   }
@@ -407,15 +408,15 @@ async function route(request,env,privateStaffOnly) {
       return output({ok:true},200,setCookie(staffCookie,'',0,passwordAccounts || url.protocol==='https:'));
     }
     if (method==='GET' && path==='/api/staff/offline') {
-      const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,
-        (SELECT SUM(p.bytes) FROM json_each(v.photos) j JOIN photos p ON p.id=j.value) AS bytes
+      const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,v.manifest,
+        (SELECT SUM(p.bytes) FROM json_each(v.photos) j JOIN photos p ON p.id=j.value WHERE NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.builder.excluded') e WHERE e.value=j.key)) AS bytes
         FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
         AND json_array_length(v.manifest,'$.rooms')>0
-        AND COALESCE(json_array_length(v.manifest,'$.builder.unplaced'),0)=0 AND COALESCE(json_array_length(v.manifest,'$.builder.missing'),0)=0
-        AND NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.rooms') r,json_each(r.value,'$.links') l WHERE json_extract(l.value,'$.pending')=1)
+        AND (json_extract(v.manifest,'$.grid.mode')='graph' OR (COALESCE(json_array_length(v.manifest,'$.builder.unplaced'),0)=0 AND COALESCE(json_array_length(v.manifest,'$.builder.missing'),0)=0
+        AND NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.rooms') r,json_each(r.value,'$.links') l WHERE json_extract(l.value,'$.pending')=1)))
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.title`);
-      return output({apartments,now});
+      return output({apartments:apartments.flatMap(({manifest,...a})=>{try{validateApartment(JSON.parse(manifest));return [a];}catch{return [];}}),now});
     }
     const offline=/^\/api\/staff\/offline\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
     if (method==='GET' && offline) {
@@ -425,16 +426,16 @@ async function route(request,env,privateStaffOnly) {
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.seq DESC LIMIT 1`,apartment);
       if (!version) fail(404,'Offline tour not found.');
-      try { const tour=validateApartment(JSON.parse(version.manifest)); if(tour.rooms.some(r=>r.links.some(l=>l.pending)))throw Error('Unpositioned doorway.'); } catch(error) { fail(409,'Finish this apartment before downloading it offline.'); }
+      let offlineTour;try { const tour=validateApartment(JSON.parse(version.manifest));offlineTour=tour; if(tour.rooms.some(r=>r.links.some(l=>l.pending)))throw Error('Unpositioned doorway.'); } catch(error) { fail(409,'Finish this apartment before downloading it offline.'); }
       const revision=String(version.seq);
       if (room) {
         if (url.searchParams.get('revision')!==revision) fail(409,'The apartment changed. Download the new version.');
-        return tourAsset(version,room,env);
+        if(!offlineTour.rooms.some(r=>r.id===room))fail(404,'Viewpoint is excluded.');return tourAsset(version,room,env);
       }
-      const images=JSON.parse(version.offline_images);
+      const images=JSON.parse(version.offline_images).filter(i=>offlineTour.rooms.some(r=>r.id===i.room));
       const offlineHours=env.TOUR_OFFLINE_HOURS===undefined ? 24 : Number(env.TOUR_OFFLINE_HOURS);
       if (!Number.isInteger(offlineHours) || offlineHours<1 || offlineHours>168) fail(503,'Offline access duration is not configured correctly.');
-      return output({tour:JSON.parse(version.manifest),revision,expires:now+offlineHours*hour,images});
+      return output({tour:offlineTour,revision,expires:now+offlineHours*hour,images});
     }
     if (method==='POST' && path==='/api/staff/photos') {
       if (request.headers.get('Content-Type')!=='image/jpeg') fail(415,'Send one stitched JPEG.');
@@ -495,7 +496,7 @@ async function route(request,env,privateStaffOnly) {
       const args=[latest.seq,apartment,apartment];
       if (action==='publish') {
         try { validateApartment(JSON.parse(latest.manifest)); } catch(error) { fail(400,error.message); }
-        if (JSON.parse(latest.manifest).rooms.some(room=>room.links.some(link=>link.pending))) fail(400,'Position every return arrow before publishing.');
+        if (validateApartment(JSON.parse(latest.manifest)).rooms.some(room=>room.links.some(link=>link.pending))) fail(400,'Position every return arrow before publishing.');
         const result=await db.batch([
           stmt(`UPDATE versions SET available=? WHERE apartment=? AND seq<>? AND ${guard}
             AND EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state=1)`,draftOnly,apartment,latest.seq,...args,apartment),
@@ -653,6 +654,7 @@ async function route(request,env,privateStaffOnly) {
 export async function tourAsset(version,room,env,guest=false) {
   if (!version) fail(404,'Tour not found.');
   if (!room) { const tour=JSON.parse(version.manifest); return output(guest?visitorManifest(tour):tour,200,{'X-Tour-Version':String(version.seq)}); }
+  if(guest&&!publicationView(JSON.parse(version.manifest)).rooms.some(r=>r.id===room))fail(404,'Viewpoint is excluded.');
   const photos=JSON.parse(version.photos);
   if (!Object.hasOwn(photos,room)) fail(404,'Photo not found.');
   const value=await env.PHOTOS.get(photos[room],{type:'stream',cacheTtl:30});

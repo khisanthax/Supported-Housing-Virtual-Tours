@@ -16,7 +16,7 @@ try{
  await page.getByRole('button',{name:'ADD ROOM',exact:true}).tap();let dialog=page.getByRole('dialog',{name:'Add Room',exact:true});await dialog.getByLabel('New room name').fill('Living Room');
  await dialog.getByLabel('Upload room stitch').setInputFiles(fileURLToPath(new URL('../cloudflare/sample-images/living.jpg',import.meta.url)));await save(()=>dialog.getByRole('button',{name:'Add room',exact:true}).tap());
  let d=await draft();const room=d.tour.rooms[0].id,photo=d.photos[room];assert.equal(d.tour.builder.missing.length,0);assert.equal(d.tour.rooms[0].roomName,'Living Room');
- await page.getByRole('button',{name:'2. Arrange Rooms',exact:true}).tap();await save(()=>page.getByRole('button',{name:'Place selected in column 1 row 1',exact:true}).tap());
+ await save(()=>page.getByRole('button',{name:'3. Review Layout',exact:true}).tap());await save(()=>page.getByRole('button',{name:'Place selected in column 1 row 1',exact:true}).tap());
  await page.locator('.tile-move').focus();await page.keyboard.press('ArrowLeft');await page.locator('#guide-status').getByText(/Choose a cell inside/).waitFor();assert.ok(await page.evaluate(()=>document.activeElement.classList.contains('tile-move')));
  await save(()=>page.keyboard.press('ArrowRight'));assert.ok(await page.evaluate(()=>document.activeElement.classList.contains('tile-move')));
  await save(()=>page.keyboard.press('ArrowDown'));assert.deepEqual((await draft()).tour.grid.positions[room],{x:1,y:1});await page.getByRole('button',{name:'Photos ▾',exact:true}).tap();

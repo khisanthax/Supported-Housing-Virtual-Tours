@@ -8,6 +8,7 @@ import { hashStaffPassword } from '../cloudflare/staff-password.mjs';
 import { moveGridRoom } from '../dist/room-grid.js';
 import { blankApartment, addIncompleteRoom } from '../dist/builder-data.js';
 import { resetLayout,restoreLayout } from '../dist/layout-state.js';
+import {enablePanorama} from '../dist/graph-tour.js';
 
 const origin = 'https://synthetic-test.workers.dev';
 const adminPassword = 'Synthetic administrator password';
@@ -98,9 +99,30 @@ function session(response) {
   return header.split(';')[0];
 }
 
+test('cloud graph publication and offline downloads project explicit exclusions while keeping the full shared draft',async t=>{
+ const {database,env,request,signIn}=await fixture(t);
+ database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');
+ const cookie=session(await signIn('admin',adminPassword)),tour=enablePanorama(blankApartment());
+ for(const name of ['Living Room','Dining Room','Unused'])addIncompleteRoom(tour,name);
+ tour.builder.missing=['room-3'];tour.builder.excluded=['room-3'];
+ const photos={'room-1':'a'.repeat(32),'room-2':'b'.repeat(32)};for(const id of Object.values(photos))database.prepare('INSERT INTO photos VALUES(?,100,1)').run(id);
+ const saved=await request('/api/staff/apartments',{method:'POST',cookie,body:{tour,photos}});assert.equal(saved.status,201);const {id,version}=await saved.json();
+ assert.ok((await(await request('/api/staff/offline',{cookie})).json()).apartments.some(a=>a.id===id));
+ const offline=await(await request('/api/staff/offline/'+id+'/manifest',{cookie})).json();assert.equal(offline.tour.rooms.length,2);assert.equal(offline.images.length,2);
+ assert.equal((await request('/api/staff/offline/'+id+'/images/room-3?revision='+version,{cookie})).status,404);
+ assert.equal((await request('/api/staff/apartments/'+id,{method:'PATCH',cookie,body:{action:'publish',expectedVersion:version}})).status,200);
+ t.mock.timers.setTime(Date.now()+61000);
+ const share=await(await request('/api/staff/shares',{method:'POST',cookie,body:{apartments:[id],expires:Date.now()+300000,wordCount:3}})).json();
+ const unlocked=await request('/api/guest/unlock',{method:'POST',body:{token:new URL(share.url).hash.slice(1),code:share.code}});assert.equal(unlocked.status,200);const guest=unlocked.headers.get('set-cookie').split(';')[0];
+ assert.equal((await(await request('/api/guest/tours/'+id+'/manifest',{cookie:guest})).json()).rooms.length,2);
+ env.PHOTOS={get(){throw Error('Excluded JPEG must not be read');}};
+ assert.equal((await request('/api/guest/tours/'+id+'/images/room-3',{cookie:guest})).status,404);
+ assert.equal((await(await request('/api/staff/drafts/'+id,{cookie})).json()).tour.rooms.length,3);
+});
+
 test('private tour dispatch preserves ingress identity, rejects cross-origin writes and supports rollback',async t=>{
  const {env,request}=await fixture(t);let forwarded;
- env.STAFF_LOGIN={getByName(name){assert.equal(name,'tour-api-v1');return {fetch(r){forwarded=r;return new Response('{}');}};}};
+ env.STAFF_LOGIN={getByName(name){assert.equal(name,'tour-api-v2');return {fetch(r){forwarded=r;return new Response('{}');}};}};
  assert.equal((await request('/api/guest/unlock',{method:'POST',body:{},ip:'real-source',forwardedClient:'spoofed'})).status,200);
  assert.equal(forwarded.headers.get('X-Staff-Login-Client'),'real-source');
  forwarded=null;assert.equal((await request('/api/staff/apartments',{method:'POST',body:{},requestOrigin:'https://other.example'})).status,403);assert.equal(forwarded,null);

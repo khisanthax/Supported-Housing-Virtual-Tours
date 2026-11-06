@@ -29,7 +29,7 @@ export function gridEdges(tour) {
     const a = tour.rooms[i], b = tour.rooms[j], key = edgeKey(a.id, b.id);
     const p = grid.positions[a.id], q = grid.positions[b.id];
     const adjacent = !!p && !!q && Math.abs(p.x - q.x) + Math.abs(p.y - q.y) === 1;
-    if (adjacent || grid.manual.includes(key)) edges.push({ a, b, key, adjacent, enabled: !grid.blocked.includes(key) });
+    if ((grid.mode!=='graph'&&adjacent) || grid.manual.includes(key) || (grid.mode==='graph'&&a.links.some(l=>l.target===b.id))) edges.push({ a, b, key, adjacent, enabled: !grid.blocked.includes(key) });
   }
   return edges;
 }
@@ -82,6 +82,7 @@ export function toggleGridConnection(tour, key) {
 export function validateGrid(tour) {
   if (tour.grid === undefined) return;
   const g = tour.grid, ids = new Set(tour.rooms.map(r => r.id));
+  if(g.mode!==undefined&&g.mode!=='graph')throw Error('Invalid layout mode.');
   if (ids.size > 12 || !g || ![1,2].includes(g.version) || !g.positions || Array.isArray(g.positions) || Object.keys(g.positions).length !== ids.size - (tour.builder?.unplaced.length ?? 0)) throw new Error('Invalid room grid.');
   const cells = new Set();
   for (const [id, p] of Object.entries(g.positions)) {

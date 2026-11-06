@@ -8,4 +8,4 @@ The Cloudflare pilot uses Workers, D1 for manifests and permissions, and KV for 
 
 The [pilot handoff](PILOT.md) covers the physical Fold 7 test, staff onboarding and recovery, and importing the first approved apartment without coding.
 
-The hosted editor starts in the Apartment Gallery and guides staff through Upload Photos, Arrange Rooms, Place Doorways and Preview & Publish. See [actual synthetic application screenshots](docs/EDITOR-SCREENSHOTS.md) and [the staff guide](STAFF.md).
+The hosted editor starts in the Apartment Gallery and guides staff through Upload Stitches, Connect Rooms, Review Layout and Preview & Publish. New tours connect doorways directly in the panorama; their relationship diagram is generated afterward without inferring doors from adjacency. Existing legacy layouts are preserved until staff explicitly convert them. See [the staff guide](STAFF.md). The older [synthetic application screenshots](docs/EDITOR-SCREENSHOTS.md) document the previous grid-first workflow.
