@@ -1,7 +1,8 @@
 import {gridFor,edgeKey,reconcileGrid,validateGrid} from './room-grid.js';
+import {publicationView} from './graph-tour.js';
 
 export function captureLayout(tour) {
-  return structuredClone({grid:gridFor(tour),unplaced:tour.builder?.unplaced??[],rooms:tour.rooms.map(r=>({id:r.id,links:r.links}))});
+  return structuredClone({grid:gridFor(tour),unplaced:tour.builder?.unplaced??[],...(tour.builder?.excluded?{excluded:tour.builder.excluded}:{}),rooms:tour.rooms.map(r=>({id:r.id,links:r.links}))});
 }
 
 export function restoreLayout(tour,snapshot) {
@@ -10,6 +11,7 @@ export function restoreLayout(tour,snapshot) {
   tour.grid=structuredClone(snapshot.grid);
   tour.builder??={version:1,unplaced:[],missing:[]};
   tour.builder.unplaced=[...snapshot.unplaced];
+  if(snapshot.excluded)tour.builder.excluded=[...snapshot.excluded];else delete tour.builder.excluded;
   for(const room of tour.rooms)room.links=structuredClone(snapshot.rooms.find(r=>r.id===room.id).links);
   return reconcileGrid(tour);
 }
@@ -20,7 +22,7 @@ export function resetLayout(tour,now=Date.now()) {
   const grid=gridFor(tour),manual=new Set(grid.manual.filter(k=>!grid.inferred?.includes(k)));
   tour.builder??={version:1,unplaced:[],missing:[]};
   tour.builder.unplaced=tour.rooms.map(r=>r.id);
-  tour.grid={version:2,positions:{},manual:[...manual],blocked:grid.blocked.filter(k=>manual.has(k))};
+  tour.grid={version:2,...(grid.mode?{mode:grid.mode}:{}),positions:{},manual:[...manual],blocked:grid.blocked.filter(k=>manual.has(k))};
   for(const room of tour.rooms)room.links=room.links.filter(l=>manual.has(edgeKey(room.id,l.target))&&!tour.grid.blocked.includes(edgeKey(room.id,l.target)));
   return reconcileGrid(tour);
 }
@@ -32,6 +34,7 @@ export function validateLayoutCheckpoint(tour) {
   const s=cp.layout;
   if(!s||!s.grid||!Array.isArray(s.rooms)||s.rooms.length>12||!Array.isArray(s.unplaced))throw Error('Invalid checkpoint viewpoints.');
   const ids=new Set(s.rooms.map(r=>r?.id));
+  if(s.excluded!==undefined&&(!Array.isArray(s.excluded)||new Set(s.excluded).size!==s.excluded.length||s.excluded.some(id=>!ids.has(id))))throw Error('Invalid checkpoint exclusions.');
   if(ids.size!==s.rooms.length||[...ids].some(id=>typeof id!=='string'||!/^[a-z0-9-]{1,64}$/.test(id))||new Set(s.unplaced).size!==s.unplaced.length||s.unplaced.some(id=>!ids.has(id)))throw Error('Invalid checkpoint viewpoint IDs.');
   const pairs=new Map();
   for(const r of s.rooms){
@@ -57,6 +60,6 @@ export class LayoutUndo {
 }
 
 export function visitorManifest(tour) {
-  const {layoutCheckpoint,...visible}=tour;
+  const {layoutCheckpoint,...visible}=publicationView(tour);
   return visible;
 }

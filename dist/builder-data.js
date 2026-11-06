@@ -7,6 +7,7 @@ export function validateBuilder(tour, draft = false) {
   const ids = new Set(tour.rooms.map(r => r.id));
   if (!b || b.version !== 1) throw new Error('Invalid apartment draft state.');
   for (const list of [b.unplaced, b.missing]) if (!Array.isArray(list) || list.length > 12 || new Set(list).size !== list.length || list.some(id => !ids.has(id))) throw new Error('Invalid unplaced or incomplete room.');
+  if(b.excluded!==undefined&&(!Array.isArray(b.excluded)||b.excluded.length>12||new Set(b.excluded).size!==b.excluded.length||b.excluded.some(id=>!ids.has(id))))throw Error('Invalid excluded viewpoint.');
   if (!draft && (!tour.rooms.length || b.unplaced.length || b.missing.length)) throw new Error('Place every stitch and attach an image to every room before publishing.');
 }
 export const hasStitch = (tour, id) => !tour.builder?.missing.includes(id);
