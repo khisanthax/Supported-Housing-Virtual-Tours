@@ -52,7 +52,7 @@ async function fixture(t) {
   };
   const env = {
     DB: d1, SYNTHETIC_EDGE_PILOT: '1', PILOT_ORIGIN: origin, GUEST_CODE_KEY: 'a'.repeat(64),
-    STAFF_ACCOUNTS: '1', STAFF_AUTH_MODE: 'password'
+    STAFF_ACCOUNTS: '1', STAFF_AUTH_MODE: 'password', TOUR_API_BACKEND: 'durable-object'
   };
   const delegated = [];
   const passwordWork = [];
@@ -97,6 +97,15 @@ function session(response) {
   assert.doesNotMatch(header, /(?:^|;\s*)Domain=/i);
   return header.split(';')[0];
 }
+
+test('private tour dispatch preserves ingress identity, rejects cross-origin writes and supports rollback',async t=>{
+ const {env,request}=await fixture(t);let forwarded;
+ env.STAFF_LOGIN={getByName(name){assert.equal(name,'tour-api-v1');return {fetch(r){forwarded=r;return new Response('{}');}};}};
+ assert.equal((await request('/api/guest/unlock',{method:'POST',body:{},ip:'real-source',forwardedClient:'spoofed'})).status,200);
+ assert.equal(forwarded.headers.get('X-Staff-Login-Client'),'real-source');
+ forwarded=null;assert.equal((await request('/api/staff/apartments',{method:'POST',body:{},requestOrigin:'https://other.example'})).status,403);assert.equal(forwarded,null);
+ env.TOUR_API_BACKEND='worker';assert.equal((await request('/api/staff/drafts/'+'a'.repeat(32))).status,401);assert.equal(forwarded,null);
+});
 
 test('cloud grid drafts reject incomplete publication and thumbnails require current staff authorization', async t => {
   const { database, env, request, signIn } = await fixture(t);

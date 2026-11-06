@@ -2,6 +2,8 @@
 
 This is a release evidence record, not approval to upload agency content.
 
+**6 November update:** see [RELEASE.md](RELEASE.md) for the current 44-test release, private API dispatch, bounded Free CPU gate, live account/recovery/offline/backup evidence and owner gates. The CPU observations below remain historical; the current trace has 532 public events with maximum 5 ms. Physical Fold acceptance remains unverified.
+
 ## Workspace reconciliation
 
 GitHub main at `c3e3ca7` already contained PRs #5 and #6. The canonical repository had no uncommitted files or commits absent from main. Older feature branches were already merged. The parent folder is a separate, uncommitted artifact container; `../apartment-tour` retains historical uncommitted Site prototypes. Comparing its source paths found the same viewer, sharing and offline features in the canonical repository, plus older authentication and build variants. Legacy reports remain untouched. No private archives or photographs were copied into Git.
