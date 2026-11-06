@@ -26,6 +26,10 @@ The script copies the passphrase to the clipboard from a DPAPI-encrypted file un
 
 ## Panorama-first workflow
 
+**Upload Stitches is a dedicated photo workspace.** Drop completed stitched JPEGs or a ZIP into the large upload area, or choose Add Stitch. Review files before saving. The optional room list is on the left and uploaded-photo cards on the right (stacked on phones). Cards offer a real thumbnail, 360° preview, Rename, Replace Stitch and confirmed Delete. Room-group dropdowns assign viewpoints by name only; multiple viewpoints can share a group. Add Room can attach an existing stitch, and Rename Room updates the group name. No map, Fit/Zoom, connectors or navigation warnings appear on this page, and no room assignment or spatial placement is required to continue.
+
+Controls follow the stage: photo management/backups in Upload; panorama destination handles and doorway Undo in Connect; map, Fit/Zoom, Reset/checkpoint/regeneration and layout Undo in Review Layout; visitor preview, collapsible review and explicit Publish in Preview & Publish. To undo an exclusion made during preview, return to Connect or Review Layout and choose Undo.
+
 1. **Upload Stitches**: use ADD STITCH for completed stitched JPEGs/ZIP, review names and images, and save. All images remain available without map placement.
 2. **Connect Rooms**: click a room name to open it. Drag a destination handle onto the actual doorway; the outgoing direction saves as Positioned immediately. Open the destination and drag the original room onto the return doorway. Select a handle and tap as the touch/keyboard fallback.
 3. **Review Layout**: the saved doorway graph generates a stable relationship diagram from the starting viewpoint. Unconnected viewpoints occupy a labeled section. Move tiles to clarify the diagram; neighboring tiles never create doors in panorama mode. Regenerate Layout has confirmation and Undo. This is not a measured floor plan. Complex cyclic graphs may still benefit from manual adjustments.

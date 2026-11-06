@@ -2,6 +2,8 @@
 
 This is a release evidence record, not approval to upload agency content.
 
+The Upload Stitches correction separates its drop zone, optional room grouping and thumbnail photo gallery from the Step 3 map. Browser acceptance checks no visible grid/map controls/review warnings in Upload, JPEG/ZIP review, decoded previews, room assignment/rename, multiple viewpoints per group and desktop/tablet/Fold widths, then continues through exact doorway persistence, layout, Undo, offline projection and backup. Existing graph, publication and authentication behavior is unchanged.
+
 **Panorama-first update:** 49 automated tests pass, including graph publication/offline exclusion projection and named directional status. New tours connect before map placement; Review Layout derives its diagram from saved doors without adjacency inference. Legacy layouts remain opt-in compatible. See STAFF.md and the latest LOGBOOK entries for local/live browser evidence and remaining physical-device checks.
 
 **6 November update:** see [RELEASE.md](RELEASE.md) for the current 44-test release, private API dispatch, bounded Free CPU gate, live account/recovery/offline/backup evidence and owner gates. The CPU observations below remain historical; the current trace has 532 public events with maximum 5 ms. Physical Fold acceptance remains unverified.
