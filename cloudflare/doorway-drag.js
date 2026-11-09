@@ -11,10 +11,10 @@ export function createDoorwayDrag({isEditing,canStart=isEditing,currentRoom,coor
       cancelActive?.();const fromId=currentRoom().id,start={x:event.clientX,y:event.clientY};let active=false,preview;
       if(handle||index!==undefined){event.preventDefault();event.stopPropagation();}
       node.setPointerCapture(event.pointerId);
-      const cleanup=()=>{node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',end);node.removeEventListener('pointercancel',end);if(node.hasPointerCapture(event.pointerId))node.releasePointerCapture(event.pointerId);preview?.remove();tour().classList.remove('door-drop-active','door-drop-over');if(active)pausePanning(false);cancelActive=null;};
+      const cleanup=()=>{node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',end);node.removeEventListener('pointercancel',end);if(node.hasPointerCapture(event.pointerId))node.releasePointerCapture(event.pointerId);preview?.remove();node.style.opacity='';tour().classList.remove('door-drop-active','door-drop-over');if(active)pausePanning(false);cancelActive=null;};
       const move=e=>{
         if(!active&&Math.hypot(e.clientX-start.x,e.clientY-start.y)<6)return;
-        if(!active){active=true;onStart();pausePanning(true);tour().classList.add('door-drop-active');preview=document.createElement('div');preview.className='door-drag-preview';preview.setAttribute('aria-hidden','true');preview.textContent='↑ '+name;document.body.append(preview);say('Drop on the doorway to '+name+'. Escape cancels.');}
+        if(!active){active=true;if(index!==undefined)node.style.opacity='0';onStart();pausePanning(true);tour().classList.add('door-drop-active');preview=document.createElement('div');preview.className='door-drag-preview';preview.setAttribute('aria-hidden','true');preview.textContent='↑ '+name;document.body.append(preview);say('Drop on the doorway to '+name+'. Escape cancels.');}
         e.preventDefault();preview.style.left=e.clientX+'px';preview.style.top=e.clientY+'px';tour().classList.toggle('door-drop-over',inside(e));
       };
       const end=e=>{

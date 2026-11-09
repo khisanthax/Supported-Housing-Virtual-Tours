@@ -63,7 +63,7 @@ In legacy mode only, tiles sharing an edge create a suggested two-way connection
 
 Right-click a filmstrip photo or tap **⋯** for **Replace Stitch**, **Rename Viewpoint**, **Remove from Grid** or **Delete Stitch**. Replacement validates and previews the JPEG, preserving viewpoint identity, layout, connections and arrow angles. Review arrows if the camera orientation changed. Removing from Grid returns the photo to Unplaced and retains its links. Delete requires confirmation and removes that viewpoint and inbound arrows from the private draft. Guests keep their published version.
 
-A legacy grid suggests **which** rooms connect; in panorama mode saved doorway connections define the diagram. dropping a destination handle can also create a manual connection directly. Each direction below it shows **Needs position** or **Positioned**. Choose a direction to open that panorama, then tap its actual doorway. Repeat in the destination panorama for the return. New connections have no guessed coordinates, and publication is rejected until every arrow is positioned. Visitor preview hides pending arrows and warns about them.
+A legacy grid suggests **which** rooms connect; in panorama mode saved doorway connections define the diagram. dropping a destination handle can also create a manual connection directly. Each direction below it shows **Needs position** or **Positioned**. Choose a pending direction to open that panorama, then tap its actual doorway. A positioned direction opens an information label instead. Repeat in the destination panorama for the return. New connections have no guessed coordinates, and publication is rejected until every arrow is positioned. Visitor preview hides pending arrows and warns about them.
 
 Layout, manual links, disabled edges and arrow positions save with the versioned cloud draft and travel in `.shtour` backups. Earlier tours and packages without a grid still work. These edits do not change a live guest publication until **Publish latest draft** is chosen. Offline downloads use the latest complete staff draft and retain their existing access restrictions.
 
@@ -112,3 +112,12 @@ Open **Available Offline** while signed in to download selected tours to this de
 The pilot reserves up to 400 MB of JPEG data, including current drafts, published revisions and uploads awaiting cleanup. For 175 panoramas, aim for 1.5 MiB per image on average to leave room for editing and retained versions. The individual 4 MiB upload limit can be used for a few larger images. If an image upload is interrupted, retry from the review screen. If the storage ceiling is reached, export any needed backups, then use **Clean up unused storage** before retrying. Cleanup retains active versions and gives unreferenced uploads a grace period.
 
 For **Photo is still preparing**, allow the new KV revision to propagate and try again. If an editor reports that a draft changed, reopen the latest draft before continuing. If a guest sees an access error, confirm the share is active and the intended apartments are published. If the browser reports that offline storage is incomplete, reconnect, sign in, and download the tour again.
+
+
+## Direct doorway objects
+
+In **Connect Rooms**, click an already positioned arrow to inspect its source and destination; click elsewhere to dismiss the label. Drag the arrow onto the corrected doorway to move it. The panorama remains visible, and the return direction keeps its existing position. Escape or an out-of-bounds drop cancels without saving. **Undo** restores a completed move.
+
+Double-click an arrow (double-tap on touch), or focus it and press Delete/Backspace, to open **Delete doorway connection?** Cancel keeps everything. Confirm removes that exact paired doorway and return; other doors to the same room and all JPEGs remain. Undo restores the pair. If older data has no reliable pair identity, the dialog explains that deletion is blocked rather than guessing a return. Keep a backup and have that legacy relationship reviewed.
+
+Keyboard users can press Enter/Space to inspect a focused arrow and Shift+Arrow keys to adjust it by 0.03 radians. New/pending doorways still use destination handles and the select-handle/tap-panorama fallback. Guest and Preview arrows still navigate on click. These edits save only the private draft until explicit publication.
