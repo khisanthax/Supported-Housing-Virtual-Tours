@@ -96,3 +96,7 @@ Physical Fold touch/stylus behavior remains pending: inspect, drag, cancel, doub
 
 
 Final synthetic acceptance: 50/50 automated regressions passed. Live Chromium and independent Edge passed the direct-object probe, the eight-viewpoint panorama/backup probe, and the encrypted-offline browser-process restart/failure/reconnect probe. All 65 hosted assets and the Worker module matched the tested source byte-for-byte. Guest requests to the staff arrow module and management API returned 401. The recovered house was not modified. See PR #24 and LOGBOOK.md for integration evidence; physical Fold acceptance remains pending.
+
+## Guest Links gallery acceptance — 2026-11-09
+
+The approved Drive PNG guided the navy sidebar, blue sharing toolbar, three-column thumbnail cards, selected-tile treatment and expanding mass-sharing panel. The UI adapts that design to real publication and multiple-invitation states; no mock apartment data or nonexpiring links are introduced. QR code generation is bundled MIT software, without external requests. Preset expiration is computed server-side using UTC calendar months and month-end clamping. Existing timestamp-based invitation clients remain compatible. Physical Android native sharing and image clipboard behavior require device acceptance; unsupported clipboard operations provide manual-copy/Save PNG fallbacks.

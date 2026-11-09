@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {shareExpiration} from '../cloudflare/share-expiration.mjs';
+test('server sharing presets use bounded calendar months including month-end and leap years',()=>{const n=Date.parse('2026-11-30T12:34:56Z');assert.equal(new Date(shareExpiration('3m',n)).toISOString(),'2027-02-28T12:34:56.000Z');assert.equal(new Date(shareExpiration('6m',n)).toISOString(),'2027-05-30T12:34:56.000Z');assert.equal(shareExpiration('7d',n)-n,7*86400000);assert.throws(()=>shareExpiration('forever',n));});
