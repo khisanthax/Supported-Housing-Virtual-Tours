@@ -2,7 +2,13 @@
 
 The existing hosted application remains a synthetic pilot. Workers Free was reconfirmed in the authenticated dashboard on 5 November 2026: **Free · $0 · Current plan**. No upgrade or billing action was taken.
 
-## Short physical Fold 7 test
+## Approved device scope (9 November 2026)
+
+**Editing and administration are desktop-only workflows.** The owner accepted the desktop editor and the merged arrow interaction update (PR #24). Do not require physical Fold/phone testing of upload, panorama arrow editing, layout generation, staff administration, or publishing to close the editor milestone. Existing responsive editing support may remain, but it is not a release gate.
+
+**Mobile remains a viewing device.** Before real-apartment rollout, validate viewing, room-to-room navigation, fullscreen/pan/pinch where applicable, PWA installation, encrypted offline download/unlock, airplane-mode reopen, and reconnect/update on a real phone/tablet. Do not interpret simulated viewport tests as physical-device acceptance. The legacy checklist below includes optional editing exercises from before this scope decision; skip those on mobile and perform authoring on desktop instead.
+
+## Short physical Fold 7 test (viewer acceptance; legacy editor steps optional)
 
 Use Chrome directly, rather than a link preview inside another app. Open the approved pilot at `/staff`. Use synthetic images throughout this test. No Android device was connected to the authorized ADB session during preparation.
 
