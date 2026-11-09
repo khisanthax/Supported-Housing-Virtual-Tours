@@ -54,6 +54,26 @@ function initialView(room) {
   const rect = $('pano').getBoundingClientRect();
   return { ...room.initialView, fov: rect.width < rect.height ? Math.max(room.initialView.fov, 1.85) : room.initialView.fov };
 }
+function drawDoors(scene,room){
+ const container=scene.hotspotContainer();for(const h of container.listHotspots())container.destroyHotspot(h);
+    if (!state.overrides.has(room.id)) for (const [index, link] of room.links.entries()) {
+      if (link.pending) continue;
+      const target = state.data.rooms.find((r) => r.id === link.target);
+      const button = document.createElement('button');
+      button.className = 'hotspot'; button.dataset.doorIndex = index;
+      button.setAttribute('aria-label', editor?.editing ? `Edit arrow ${index + 1} to ${target.name}` : `Go to ${target.name}`);
+      const arrow = document.createElement('span'); arrow.className = 'hotspot-arrow'; arrow.textContent = '↑'; arrow.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span'); label.className = 'hotspot-label'; label.textContent = target.name;
+      button.append(arrow, label); button.addEventListener('click', () => {
+        if (editor?.editing) { if(editor.inspectDoor)editor.inspectDoor(index,button);else editor.selectDoor(index,true); }
+        else openRoom(target.id, { focus: true });
+      });
+      if(editor?.editing)editor.bindDoorDrag?.(button,index,target);
+      // Marzipano owns the anchor's transform; centre the inner button separately.
+      const anchor = document.createElement('div'); anchor.append(button);
+      scene.hotspotContainer().createHotspot(anchor, { yaw: link.yaw, pitch: link.pitch });
+    }
+}
 async function openRoom(id, { focus = false, force = false, position } = {}) {
   const room = state.data.rooms.find((r) => r.id === id);
   if (!room || (room === state.room && !force)) return;
@@ -69,23 +89,7 @@ async function openRoom(id, { focus = false, force = false, position } = {}) {
     const view = new M.RectilinearView(position || initialView(room), limiter);
     nextScene = state.viewer.createScene({ source: M.ImageUrlSource.fromString(image.url), geometry: new M.EquirectGeometry([{ width: image.width }]), view, pinFirstLevel: true });
     nextScene.layer().textureStore().addEventListener('textureError', () => report('This device could not render the image. Try a smaller 2:1 JPEG.'));
-    if (!state.overrides.has(id)) for (const [index, link] of room.links.entries()) {
-      if (link.pending) continue;
-      const target = state.data.rooms.find((r) => r.id === link.target);
-      const button = document.createElement('button');
-      button.className = 'hotspot'; button.dataset.doorIndex = index;
-      button.setAttribute('aria-label', editor?.editing ? `Edit arrow ${index + 1} to ${target.name}` : `Go to ${target.name}`);
-      const arrow = document.createElement('span'); arrow.className = 'hotspot-arrow'; arrow.textContent = '↑'; arrow.setAttribute('aria-hidden', 'true');
-      const label = document.createElement('span'); label.className = 'hotspot-label'; label.textContent = target.name;
-      button.append(arrow, label); button.addEventListener('click', () => {
-        if (editor?.editing) editor.selectDoor(index, true);
-        else openRoom(target.id, { focus: true });
-      });
-      if(editor?.editing)editor.bindDoorDrag?.(button,index,target);
-      // Marzipano owns the anchor's transform; centre the inner button separately.
-      const anchor = document.createElement('div'); anchor.append(button);
-      nextScene.hotspotContainer().createHotspot(anchor, { yaw: link.yaw, pitch: link.pitch });
-    }
+    drawDoors(nextScene,room);
     // Zero-duration scene switches avoid retaining large old panoramas during transitions.
     nextScene.switchTo({ transitionDuration: 0 });
     const oldScene = state.scene;
@@ -191,7 +195,8 @@ async function showTour(data, images, preferredRoom, keepView = false) {
     button.append(number, document.createTextNode(room.name)); button.addEventListener('click', () => openRoom(room.id)); $('room-tabs').append(button);
   });
   const target = data.rooms.some(room => room.id === preferredRoom) ? preferredRoom : data.startRoom;
-  await openRoom(target, { force: true, position });
+  if(keepView&&state.scene&&state.room?.id===target&&previous.get(target)?.blob===newUrls.get(target)?.blob){state.room=data.rooms.find(r=>r.id===target);drawDoors(state.scene,state.room);updateUI(state.room);state.viewer.updateSize();}
+  else await openRoom(target, { force: true, position });
   for (const [id, entry] of previous) if (newUrls.get(id) !== entry) URL.revokeObjectURL(entry.url);
 }
 async function init() {

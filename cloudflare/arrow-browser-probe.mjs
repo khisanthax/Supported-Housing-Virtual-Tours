@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+import {placeDoorway} from '../dist/doorway-data.js';
+const o=process.env.PILOT_PROBE_ORIGIN,pass=process.env.PILOT_PROBE_STAFF;
+assert.ok(o&&pass);
+const {chromium}=await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href),b=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']}),edge=await chromium.launch({channel:'msedge',args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+let p,id,rev;let imageRequests=0;const errors=[];
+async function api(path,method='GET',data){const r=await p.request.fetch(o+'/api/staff/'+path,{method,headers:{Origin:o},data});assert.ok(r.ok(),path+' '+r.status());return r.json();}
+async function save(action){const [r]=await Promise.all([p.waitForResponse(r=>r.url()===o+'/api/staff/apartments'&&r.request().method()==='POST'),action()]);assert.equal(r.status(),201);rev=(await r.json()).version;await p.waitForFunction(()=>!document.querySelector('#guide-status').textContent.includes('Saving…'));}
+async function draft(){return api('drafts/'+id);}
+try{
+ p=await b.newPage();p.on('pageerror',e=>errors.push(e.message));p.on('response',r=>{if(r.url().includes('/images/'))imageRequests++;});
+ await p.goto(o+'/staff');if(process.env.PILOT_PROBE_USERNAME)await p.locator('#username-field input').fill(process.env.PILOT_PROBE_USERNAME);await p.locator('input[name=passphrase]').fill(pass);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByRole('heading',{name:'Apartment Gallery',exact:true}).waitFor();
+ const t=JSON.parse(await readFile('cloudflare/sample.json'));t.title='Synthetic arrow objects '+Date.now();t.rooms=t.rooms.slice(0,2).map(r=>({...r,links:[]}));t.builder={version:1,unplaced:t.rooms.map(r=>r.id),missing:[]};t.grid={version:2,mode:'graph',positions:{},manual:[],blocked:[]};const [a,z]=t.rooms;
+ placeDoorway(t,a.id,z.id,{yaw:.25,pitch:0});placeDoorway(t,a.id,z.id,{yaw:-.55,pitch:.1},{another:true});z.links.forEach((l,i)=>Object.assign(l,{yaw:.3+i*.3,pitch:0,pending:false}));
+ const photos={};for(const r of t.rooms){const response=await p.request.post(o+'/api/staff/photos',{headers:{Origin:o,'Content-Type':'image/jpeg'},data:await readFile('cloudflare/sample-images/'+r.id+'.jpg')});assert.equal(response.status(),201);photos[r.id]=(await response.json()).id;}
+ const created=await api('apartments','POST',{tour:t,photos});id=created.id;rev=created.version;
+ await p.goto(o+'/staff/editor/?apartment='+id);await p.locator('#guide-title').waitFor();await p.getByRole('button',{name:'2. Connect Rooms',exact:true}).click();await p.locator('#loading').waitFor({state:'hidden'});const arrow=()=>p.locator('.hotspot[data-door-index="0"]');
+ if(process.env.PILOT_EXPECT_OLD==='1'){await arrow().click();assert.ok(await p.locator('#place-on-pano').isVisible());await p.locator('#place-on-pano').hover();console.log('BASELINE placement overlay hover background: '+await p.locator('#place-on-pano').evaluate(n=>getComputedStyle(n).backgroundColor));}
+ else{
+ const before=await draft(),requests=imageRequests;
+ await p.locator('.destination-handle[data-destination="'+z.id+'"]').click();await p.locator('#place-on-pano').hover();assert.equal(await p.locator('#place-on-pano').evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)');await p.keyboard.press('Escape');
+ await arrow().click();await p.locator('.arrow-inspection').waitFor();assert.ok(!await p.locator('#place-on-pano').isVisible());assert.deepEqual(await draft(),before);assert.equal(imageRequests,requests);
+ if(process.env.PILOT_ARROW_SCREENSHOT)await p.screenshot({path:process.env.PILOT_ARROW_SCREENSHOT});
+ await arrow().dblclick();let dialog=p.getByRole('dialog',{name:'Delete doorway connection?',exact:true});await dialog.waitFor();await dialog.getByRole('button',{name:'Cancel',exact:true}).click();assert.deepEqual(await draft(),before);
+ await arrow().dblclick();dialog=p.getByRole('dialog',{name:'Delete doorway connection?',exact:true});await save(()=>dialog.getByRole('button',{name:'Delete Doorway',exact:true}).click());let d=await draft();assert.equal(d.tour.rooms[0].links.length,1);assert.equal(d.tour.rooms[0].links[0].pairId,a.links[1].pairId);assert.equal(d.tour.rooms[1].links.length,1);assert.deepEqual(d.photos,photos);assert.equal(imageRequests,requests);
+ await save(()=>p.getByRole('button',{name:'Undo',exact:true}).click());assert.deepEqual((await draft()).tour.rooms,before.tour.rooms);
+ await arrow().focus();await save(()=>p.keyboard.press('Shift+ArrowRight'));d=await draft();assert.ok(Math.abs(d.tour.rooms[0].links[0].yaw-.28)<.00001);assert.deepEqual(d.tour.rooms[1],before.tour.rooms[1]);assert.deepEqual(d.tour.rooms[0].links[1],before.tour.rooms[0].links[1]);assert.equal(imageRequests,requests);
+ await save(()=>p.getByRole('button',{name:'Undo',exact:true}).click());
+ const canceledBaseline=await draft();
+ const rect=await arrow().boundingBox(),pano=await p.locator('#pano').boundingBox();
+ const begin=async()=>{await p.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await p.mouse.down();await p.mouse.move(pano.x+pano.width*.7,pano.y+pano.height*.6,{steps:10});};
+ await begin();assert.ok(await p.locator('.door-drag-preview').isVisible());await p.keyboard.press('Escape');await p.mouse.up();assert.deepEqual(await draft(),canceledBaseline);assert.equal(await arrow().evaluate(n=>n.style.opacity),'');
+ await begin();await p.mouse.move(2,2);await p.mouse.up();assert.deepEqual(await draft(),canceledBaseline);
+ await save(async()=>{await begin();await p.mouse.up();});d=await draft();assert.notEqual(d.tour.rooms[0].links[0].yaw,.25);assert.deepEqual(d.tour.rooms[1],before.tour.rooms[1]);assert.equal(imageRequests,requests);
+ await p.reload();await p.locator('#guide-title').waitFor();assert.deepEqual((await draft()).tour.rooms,d.tour.rooms);
+ const other=await edge.newContext({storageState:await p.context().storageState(),viewport:{width:390,height:844},isMobile:true,hasTouch:true}),touch=await other.newPage();await touch.goto(o+'/staff/editor/?apartment='+id);await touch.locator('#guide-title').waitFor();await touch.getByRole('button',{name:'2. Connect Rooms',exact:true}).click();await touch.locator('#loading').waitFor({state:'hidden'});await touch.locator('.hotspot').first().tap();await touch.locator('.arrow-inspection').waitFor();assert.ok(!await touch.locator('#place-on-pano').isVisible());
+ await touch.waitForTimeout(400);await touch.locator('.hotspot').first().tap();await touch.locator('.hotspot').first().tap();const td=touch.getByRole('dialog',{name:'Delete doorway connection?',exact:true});await td.waitFor();assert.equal(await touch.getByRole('dialog').count(),1);await td.getByRole('button',{name:'Cancel',exact:true}).click();assert.deepEqual((await draft()).tour.rooms,d.tour.rooms);
+ await touch.setViewportSize({width:900,height:900});await touch.locator('.hotspot').first().focus();await touch.keyboard.press('Delete');await td.waitFor();await td.getByRole('button',{name:'Cancel',exact:true}).click();await other.close();
+ await p.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();await p.locator('#loading').waitFor({state:'hidden'});await arrow().click();await p.waitForFunction(id=>document.querySelector('#room-tabs .room-tab[data-room="'+id+'"]').getAttribute('aria-pressed')==='true',z.id);assert.equal(await p.locator('.arrow-inspection').count(),0);assert.deepEqual((await draft()).tour.rooms,d.tour.rooms);assert.deepEqual(errors,[]);
+ console.log('PASS transparent fallback, inspect/no save/no navigation/no overlay, double-click cancel/exact pair deletion/Undo, two doors preserved independently, keyboard and mouse reposition/reload, Escape and invalid-drop preservation, no doorway-edit image reload, independent Edge touch/double-tap/keyboard delete and Fold widths, Preview click navigation, no page exceptions.');
+ }
+}finally{if(p&&id){const d=await draft();await api('apartments/'+id,'PATCH',{action:'remove',expectedVersion:d.revision});}if(p)await p.request.post(o+'/api/staff/sign-out',{headers:{Origin:o}}).catch(()=>{});await b.close();await edge.close();}

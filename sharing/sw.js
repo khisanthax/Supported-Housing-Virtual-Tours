@@ -1,4 +1,4 @@
-const CACHE = 'housing-offline-v6';
+const CACHE = 'housing-offline-v7';
 const SHELL = [
   '/offline/', '/offline/app.webmanifest', '/offline/icon-192.png', '/offline/icon-512.png',
   '/offline/styles.css', '/offline/offline.css', '/offline/app.js',
