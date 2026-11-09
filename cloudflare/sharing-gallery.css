@@ -3,3 +3,5 @@
 .share-apartment{position:relative}.share-details details{position:absolute;top:10px;right:10px;background:white;border-radius:6px;padding:6px;z-index:2}.share-details details[open]{max-width:220px;box-shadow:0 2px 6px #1235}.share-details summary{cursor:pointer}.mass-sharing .share-details details{top:48px}
 .guest-links-page main{width:100%;margin:0;max-width:none}.guest-links-page h1,.guest-links-page h2{font-family:system-ui,sans-serif;font-weight:700}.share-toolbar button{border-color:#c5d8f2}.guest-links-page .share-photo h2{font-size:22px}.guest-links-page .publication{font-family:system-ui,sans-serif;font-size:13px}
 .guest-links-page{font-family:system-ui,sans-serif}.share-photo input:disabled{cursor:not-allowed}.share-details summary{list-style:none}.share-details summary::-webkit-details-marker{display:none}
+
+#mass-toggle[aria-expanded="true"]{outline:3px solid #8bbcff;box-shadow:0 0 0 2px white}#mass-expiration{font:inherit;border:1px solid #a8c6ec;border-radius:8px;padding:10px;background:white}#mass-create{background:#0867db;border-color:#0867db}

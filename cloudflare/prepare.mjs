@@ -229,3 +229,5 @@ await copy('cloudflare/qr.mjs','sharing/qr.js');
 await copy('cloudflare/sharing-gallery.css','sharing/sharing-gallery.css');
 await put('sharing/staff.js',(await readFile(new URL('sharing/staff.js',output),'utf8'))+'\n'+await readFile(new URL('cloudflare/sharing-gallery.js',root),'utf8'));
 await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',output),'utf8')).replace('</head>','<link rel="stylesheet" href="/sharing/sharing-gallery.css"></head>'));
+
+await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',output),'utf8')).replace('<main>','<main>'+await readFile(new URL('cloudflare/sharing-workspace.html',root),'utf8')));
