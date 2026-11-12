@@ -27,6 +27,7 @@ export async function exportApartment(apartment) {
 }
 export async function importPackage(file,replacement,expectedVersion) {
   const {tour,images} = await readBackup(file);
+  if(replacement&&!confirm('Replace this private draft with the backup? Guests retain the current publication until explicit publishing.')) throw new DOMException('Backup import cancelled.','AbortError');
   for (const jpeg of images.values()) {
     if (jpeg.size > 4 * 1024 * 1024) throw new Error('Each cloud JPEG must be 4 MiB or smaller.');
   }

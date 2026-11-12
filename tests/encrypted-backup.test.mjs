@@ -5,10 +5,14 @@ import { pbkdf2Sync, createDecipheriv } from 'node:crypto';
 import { encryptBackup, decryptBackup, isEncryptedBackup, ITERATIONS } from '../dist/encrypted-backup.js';
 import { packTour, unpackTour } from '../dist/tour-package.js';
 import { zipSync, unzipSync } from '../dist/vendor/backup-crypto.js';
+import { gridFor } from '../dist/room-grid.js';
+import { captureLayout } from '../dist/layout-state.js';
 const password = 'Synthetic backup test password only';
 async function fixture(title) {
   const tour = JSON.parse(await readFile(new URL('../cloudflare/sample.json',import.meta.url)));
   tour.title = title;
+  tour.grid = gridFor(tour);
+  tour.layoutCheckpoint = {version:1,created:1700000000000,layout:captureLayout(tour)};
   const images = new Map(await Promise.all(tour.rooms.map(async r => [r.id,new Blob([await readFile(new URL('../cloudflare/sample-images/'+r.image.split('/').at(-1),import.meta.url))],{type:'image/jpeg'})])));
   return {tour,images};
 }
