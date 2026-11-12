@@ -1,8 +1,8 @@
+import { readTestBackup as unpackTour, startBackupDownload, fillBackupDialog } from './backup-probe-tools.mjs';
 import assert from 'node:assert/strict';
 import {readFile,mkdir} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
-import {unpackTour} from '../dist/tour-package.js';
 const {chromium}=await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href);
 const origin=process.env.PILOT_PROBE_ORIGIN??'http://localhost:4193';
 const password=process.env.PILOT_PROBE_STAFF??'Synthetic KV prototype staff only';
@@ -12,7 +12,7 @@ let page,id,share,revision;
 async function login(browser,mobile=false){const p=await browser.newPage({viewport:mobile?{width:390,height:844}:{width:1440,height:1050},hasTouch:mobile,isMobile:mobile});p.on('dialog',d=>d.accept());await p.goto(origin+'/staff');if(process.env.PILOT_PROBE_USERNAME)await p.locator('#username-field input').fill(process.env.PILOT_PROBE_USERNAME);await p.locator('input[name=passphrase]').fill(password);await p.getByRole('button',{name:'Sign in',exact:true}).click();await p.getByRole('heading',{name:'Apartment Gallery',exact:true}).waitFor();return p;}
 async function draft(p=page){const r=await p.request.get(origin+'/api/staff/drafts/'+id);assert.equal(r.status(),200);const d=await r.json();revision=d.revision;return d;}
 async function save(p,action){const [r]=await Promise.all([p.waitForResponse(r=>r.url()===origin+'/api/staff/apartments'&&r.request().method()==='POST'),action()]);assert.equal(r.status(),201,await r.text());const result=await r.json();id=result.id;revision=result.version;await p.waitForFunction(()=>!document.querySelector('#guide-status').textContent.includes('Saving…'));}
-async function upload(files){const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'ADD STITCH',exact:true}).click();await(await picker).setFiles(files);const review=page.getByRole('dialog',{name:'Review stitched panoramas'});await review.waitFor();assert.equal(await review.locator('img').count(),files.length);for(const select of await review.locator('select').all())await select.selectOption('add');await save(page,()=>review.getByRole('button',{name:'Upload and save draft'}).click());await review.waitFor({state:'hidden'});}
+async function upload(files){const returnToLayout=await page.locator('#guide-workspace').isVisible();await page.getByRole('button',{name:'1. Upload Stitches',exact:true}).click();const picker=page.waitForEvent('filechooser');await page.getByRole('button',{name:'ADD STITCH',exact:true}).click();await(await picker).setFiles(files);const review=page.getByRole('dialog',{name:'Review stitched panoramas'});await review.waitFor();assert.equal(await review.locator('img').count(),files.length);for(const select of await review.locator('select').all())await select.selectOption('add');await save(page,()=>review.getByRole('button',{name:'Upload and save draft'}).click());await review.waitFor({state:'hidden'});if(returnToLayout)await page.getByRole('button',{name:'3. Review Layout',exact:true}).click();}
 async function select(p,id){await p.locator('.stitch-card[data-room="'+id+'"] .stitch-select').click();}
 async function place(p,id,x,y){await select(p,id);await save(p,()=>p.getByRole('button',{name:`Place selected in column ${x+1} row ${y+1}`,exact:true}).click());}
 try{
@@ -46,8 +46,8 @@ try{
  await page.locator('.stitch-card[data-room="'+ids[0]+'"] .stitch-menu').click();await save(page,()=>page.getByRole('dialog',{name:'Stitch actions'}).getByRole('button',{name:'Remove from Grid',exact:true}).click());
  const unplaced=await draft();assert.ok(unplaced.tour.builder.unplaced.includes(ids[0]));assert.equal(unplaced.photos[ids[0]],after.photos[ids[0]]);assert.deepEqual(unplaced.tour.rooms[0].links,after.tour.rooms[0].links);await place(page,ids[0],0,0);
  await upload([photos[0]]);d=await draft();const sixth=d.tour.rooms.at(-1).id;await place(page,sixth,3,2);
- await page.getByRole('button',{name:'ADD ROOM',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Add Room',exact:true});await dialog.getByRole('textbox',{name:'New room name'}).fill('Study');await save(page,()=>dialog.getByRole('button',{name:'Add room',exact:true}).click());
- d=await draft();const seventh=d.tour.rooms.at(-1).id;assert.ok(d.tour.builder.missing.includes(seventh));assert.equal(Object.keys(d.photos).length,6);
+ await page.getByRole('button',{name:'1. Upload Stitches',exact:true}).click();await page.getByRole('button',{name:'ADD ROOM',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Add Room',exact:true});await dialog.getByRole('textbox',{name:'New room name'}).fill('Study');await save(page,()=>dialog.getByRole('button',{name:'Add room',exact:true}).click());
+ await page.getByRole('button',{name:'3. Review Layout',exact:true}).click();d=await draft();const seventh=d.tour.rooms.at(-1).id;assert.ok(d.tour.builder.missing.includes(seventh));assert.equal(Object.keys(d.photos).length,6);
  await page.locator('.stitch-card[data-room="'+seventh+'"] .stitch-menu').click();const pick=page.waitForEvent('filechooser');await page.getByRole('dialog',{name:'Stitch actions'}).getByRole('button',{name:'Replace Stitch',exact:true}).click();await(await pick).setFiles(photos[5]);await save(page,()=>page.getByRole('dialog',{name:'Replace Stitch',exact:true}).getByRole('button',{name:'Save replacement'}).click());await place(page,seventh,3,3);
  await select(page,ids[0]);await page.locator('#guide-target').selectOption(sixth);await save(page,()=>page.getByRole('button',{name:'Connect rooms',exact:true}).click());
  await page.getByRole('button',{name:'2. Connect Rooms',exact:true}).click();
@@ -62,8 +62,8 @@ try{
  assert.deepEqual((await draft(mobile)).tour.grid.positions[seventh],{x:1,y:3});
  await page.reload();await page.locator('#guide-title').waitFor();d=await draft();
  await mkdir('test-results/guided',{recursive:true});await mobile.screenshot({path:'test-results/guided/folded.png'});await mobile.setViewportSize({width:900,height:900});await mobile.screenshot({path:'test-results/guided/unfolded.png'});
- const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:'Export Backup',exact:true}).click()]);const bytes=await readFile(await download.path());assert.deepEqual((await unpackTour(new Blob([bytes]))).tour,d.tour);
- await save(page,()=>page.locator('#guide-import').setInputFiles({name:'synthetic-guided.shtour',mimeType:'application/octet-stream',buffer:bytes}));assert.deepEqual((await draft()).tour,d.tour);
+ await page.getByRole('button',{name:'1. Upload Stitches',exact:true}).click();const [download]=await Promise.all([page.waitForEvent('download'),startBackupDownload(page,page.getByRole('button',{name:'Export Backup',exact:true}))]);const bytes=await readFile(await download.path());assert.deepEqual((await unpackTour(new Blob([bytes]))).tour,d.tour);
+ await save(page,async()=>{await page.locator('#guide-import').setInputFiles({name:'synthetic-guided.shtour.zip',mimeType:'application/zip',buffer:bytes});await fillBackupDialog(page);});assert.deepEqual((await draft()).tour,d.tour);
  await page.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();await page.locator('#guide-viewer').waitFor();
  const published=page.waitForResponse(r=>r.url()===origin+'/api/staff/apartments/'+id&&r.request().method()==='PATCH');await page.getByRole('button',{name:'Publish apartment',exact:true}).click();assert.equal((await published).status(),200);
  await page.screenshot({path:'test-results/guided/preview.png'});await page.getByRole('button',{name:'3. Review Layout',exact:true}).click();await page.screenshot({path:'test-results/guided/arrange.png'});

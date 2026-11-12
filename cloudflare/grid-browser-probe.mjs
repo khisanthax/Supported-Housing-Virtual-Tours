@@ -1,7 +1,7 @@
+import { readTestBackup as unpackTour, startBackupDownload, fillBackupDialog } from './backup-probe-tools.mjs';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { unpackTour } from '../dist/tour-package.js';
 const { chromium } = await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href);
 const origin = process.env.PILOT_PROBE_ORIGIN ?? 'http://localhost:4193';
 const password = process.env.PILOT_PROBE_STAFF ?? (origin === 'http://localhost:4193' ? 'Synthetic KV prototype staff only' : null);
@@ -96,10 +96,11 @@ try {
   assert.ok(d.tour.rooms[0].links.find(l => l.target === c.id).yaw !== undefined);
   await mobile.setViewportSize({ width: 900, height: 700 });
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-  const [download] = await Promise.all([mobile.waitForEvent('download'), mobile.locator('#export-tour').click()]);
+  const [download] = await Promise.all([mobile.waitForEvent('download'), startBackupDownload(mobile,mobile.locator('#export-tour'))]);
   const bytes = await readFile(await download.path()), backup = await unpackTour(new Blob([bytes]));
   assert.deepEqual(backup.tour, d.tour);
   await mobile.locator('#import-tour').setInputFiles({ name: 'synthetic-grid.shtour', mimeType: 'application/octet-stream', buffer: bytes });
+  await fillBackupDialog(mobile);
   await save(mobile, () => mobile.getByRole('button', { name: 'Replace draft with backup', exact: true }).click());
   assert.deepEqual((await draft(mobile)).tour, backup.tour);
   await mobile.setViewportSize({ width: 390, height: 844 });

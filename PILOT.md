@@ -64,3 +64,6 @@ Tour packages omit staff accounts, roles, guest links, sessions and server secre
 ### UAC owner direction — 12 November 2026
 
 The public Client Gallery is deferred. Keep the app login-only and preserve private guest invitations. Administrator UAC configures Staff defaults, individual overrides and apartment scope; Client remains a reserved read-only context without accounts. No Gmail API, SMS, recipient restrictions, approval workflow or new presentation/offline feature is included. See STAFF.md and UAC-AUDIT.md for current behavior and rollout/rollback details. Earlier public-gallery tasks are superseded.
+
+
+New backup exports are password-encrypted `.shtour.zip` files. Enter and confirm a separate backup password, store it separately, and restore through the app; older unencrypted `.shtour` imports remain supported. See [encrypted backup instructions and recovery limits](BACKUPS.md).
