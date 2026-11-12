@@ -1,4 +1,4 @@
-import { packTour, unpackTour } from '/staff/editor/tour-package.js';
+import { exportBackup, readBackup } from '/staff/editor/backup-ui.js';
 async function send(path,body,type) {
   const response = await fetch('/api/staff/'+path,{method:'POST',headers:{'Content-Type':type},body});
   const result = await response.json();
@@ -6,9 +6,10 @@ async function send(path,body,type) {
   return result;
 }
 export async function exportApartment(apartment) {
+  return exportBackup(async signal => {
   const endpoint='/api/staff/tours/'+apartment;
   const get=async path=>{
-    const response=await fetch(endpoint+'/'+path);
+    const response=await fetch(endpoint+'/'+path,{signal});
     if (!response.ok) throw new Error('Tour is unavailable. Retry shortly.');
     return response;
   };
@@ -21,15 +22,12 @@ export async function exportApartment(apartment) {
     const photo=await get('images/'+room.id+'?version='+version);
     images.set(room.id,await photo.blob());
   }
-  const url=URL.createObjectURL(packTour({tour,images}));
-  const link=document.createElement('a');
-  link.href=url;
-  link.download='apartment-'+apartment.slice(0,8)+'.shtour';
-  link.click();
-  setTimeout(()=>URL.revokeObjectURL(url),10000);
+  return {tour,images};
+  });
 }
 export async function importPackage(file,replacement,expectedVersion) {
-  const {tour,images} = await unpackTour(file);
+  const {tour,images} = await readBackup(file);
+  if(replacement&&!confirm('Replace this private draft with the backup? Guests retain the current publication until explicit publishing.')) throw new DOMException('Backup import cancelled.','AbortError');
   for (const jpeg of images.values()) {
     if (jpeg.size > 4 * 1024 * 1024) throw new Error('Each cloud JPEG must be 4 MiB or smaller.');
   }

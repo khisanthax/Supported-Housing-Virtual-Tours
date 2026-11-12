@@ -1,9 +1,9 @@
+import { readTestBackup as unpackTour, startBackupDownload } from './backup-probe-tools.mjs';
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {unpackTour} from '../dist/tour-package.js';
 import {resetLayout,restoreLayout,captureLayout,visitorManifest} from '../dist/layout-state.js';
 const origin=process.env.PILOT_PROBE_ORIGIN??'http://localhost:4193',house=process.env.PILOT_LAYOUT_HOUSE;
 assert.ok(!house,'Existing apartments must not be mutated by this disposable legacy probe.');
@@ -36,7 +36,7 @@ try{
  const legacy=await draft();delete legacy.tour.grid.mode;await api(pc,'apartments','POST',{tour:legacy.tour,photos:legacy.photos,replacement:id,expectedVersion:legacy.revision},201);await pc.reload();await pc.locator('#guide-title').waitFor();
  }else{await pc.goto(origin+'/staff/editor/?apartment='+id);await pc.locator('#guide-title').waitFor();}
  original=await draft();if(house)assert.equal(original.tour.title,'Photorealistic House — Demo');
- const [download]=await Promise.all([pc.waitForEvent('download'),pc.getByRole('button',{name:'Export Backup',exact:true}).click()]);const pre=await readFile(await download.path()),unpacked=await unpackTour(new Blob([pre]));assert.deepEqual(unpacked.tour,original.tour);for(const r of original.tour.rooms)assert.equal(createHash('sha256').update(Buffer.from(await unpacked.images.get(r.id).arrayBuffer())).digest('hex'),hashes[r.id]);await writeFile(join(root,'verified-before-reset.shtour'),pre);
+ const [download]=await Promise.all([pc.waitForEvent('download'),startBackupDownload(pc,pc.getByRole('button',{name:'Export Backup',exact:true}))]);const pre=await readFile(await download.path()),unpacked=await unpackTour(new Blob([pre]));assert.deepEqual(unpacked.tour,original.tour);for(const r of original.tour.rooms)assert.equal(createHash('sha256').update(Buffer.from(await unpacked.images.get(r.id).arrayBuffer())).digest('hex'),hashes[r.id]);await writeFile(join(root,'verified-before-reset.shtour'),pre);
  if(original.tour.layoutCheckpoint){await save(pc,()=>pc.getByRole('button',{name:'Restore Reset Checkpoint',exact:true}).click());}
  await pc.getByRole('button',{name:'3. Review Layout',exact:true}).click();const source=(await draft()).tour.rooms.find(r=>r.name==='Living Room').id,target=(await draft()).tour.rooms.find(r=>r.name==='Dining Room').id;
  if(!house){await place(pc,source,0,0);await place(pc,target,1,0);}

@@ -31,3 +31,6 @@ The later layout correction adds **Photorealistic-House-Demo-before-reset.shtour
 Private source ZIP/JPEGs, snapshots, cloud identifiers, browser screenshots and packages stay outside this public repository. Existing staff backup import can restore the package as a new private apartment without coding. Restore to a new apartment when rehearsing, compare every image, and remove only the disposable rehearsal copy.
 
 The operator-only cloudflare/recovery-browser-probe.mjs reads explicit authorized environment inputs and keeps a private operation-state file to resume without creating duplicate recovery apartments. It refuses first-time creation if the exact named apartment already exists. Its replacement test affects only its own new restore fixture; it never removes the recovered apartment. Use the normal staff editor for routine changes. Issue #15 records the recovery, while physical Fold acceptance and the existing CPU headroom follow-up remain separate release gates.
+
+
+New backup exports are password-encrypted `.shtour.zip` files. Enter and confirm a separate backup password, store it separately, and restore through the app; older unencrypted `.shtour` imports remain supported. See [encrypted backup instructions and recovery limits](BACKUPS.md).

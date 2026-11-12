@@ -1,8 +1,9 @@
+import { readTestBackup as unpackTour, startBackupDownload, fillBackupDialog } from './backup-probe-tools.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { packTour, unpackTour } from '../dist/tour-package.js';
+import { packTour } from '../dist/tour-package.js';
 
 const { chromium } = await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href);
 const origin = process.env.PILOT_PROBE_ORIGIN ?? 'http://localhost:4193';
@@ -40,6 +41,7 @@ async function importBackup(bytes, replacement = '') {
     page.waitForResponse(r => r.url() === origin + '/api/staff/apartments' && r.request().method() === 'POST'),
     (async () => {
       await page.locator('#import').getByRole('button', { name: 'Import apartment', exact: true }).click();
+      if(bytes[0]===80&&bytes[1]===75)await fillBackupDialog(page);
     })()
   ]);
   assert.equal(response.status(), 201);
@@ -60,7 +62,7 @@ try {
   const row = page.locator('#catalog li').filter({ hasText: tour.title });
   await row.locator('details').evaluate(d=>{d.open=true;});
   const pending = page.waitForEvent('download');
-  await row.getByRole('button', { name: 'Export .shtour', exact: true }).click();
+  await startBackupDownload(page,row.getByRole('button', { name: 'Export .shtour', exact: true }));
   const download = await pending;
   const bytes = await readFile(await download.path());
   const backup = await unpackTour(new Blob([bytes]));

@@ -1,4 +1,5 @@
-import { addConnection, deleteRoom, inspectJpeg, MAX_ROOMS, packTour, pairedArrow, removeConnection, retargetConnection, unpackTour, validateDraft } from './tour-package.js';
+import { exportBackup, readBackup } from './backup-ui.js';
+import { addConnection, deleteRoom, inspectJpeg, MAX_ROOMS, pairedArrow, removeConnection, retargetConnection, validateDraft } from './tour-package.js';
 import { loadDraft, saveDraft } from './tour-store.js';
 import { validateDimensions } from './tour-data.js';
 import { reconcileGrid } from './room-grid.js';
@@ -288,19 +289,12 @@ export function createTourEditor({ sample, showTour, currentRoom, currentView, c
     await commit({ tour: draft.tour, images }, active.id, 'Photo replaced. Doorway links kept.');
   });
   $('export-tour').addEventListener('click', () => perform(async () => {
-    const url = URL.createObjectURL(packTour(draft));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${draft.tour.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'apartment'}.shtour`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    await exportBackup(draft);
     status(pendingCount() ? 'Draft backup download started. It includes unpositioned return arrows.' : 'Backup download started. It contains every original JPEG and doorway link.');
   }));
   filesFrom('import-tour', async ([file]) => {
     status('Checking backup…');
-    const next = await unpackTour(file);
+    const next = await readBackup(file);
     for (const image of next.images.values()) await verifyImage(image);
     if (!await confirmEdit('Import this backup?', 'Import replaces the current draft. Cancel and export the current draft first if you want to keep it.', 'Replace draft with backup')) {
       status('Current draft kept.');

@@ -43,7 +43,7 @@ for (const name of common) {
   await copy('dist/'+name,'staff/editor/'+name);
   await copy('dist/'+name,'offline/'+name);
 }
-for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js']) await copy('dist/'+name,'staff/editor/'+name);
+for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js','encrypted-backup.js','backup-ui.js','vendor/backup-crypto.js']) await copy('dist/'+name,'staff/editor/'+name);
 await put('staff/editor/legacy.html',await readFile(new URL('staff/editor/index.html',output)));
 let guidedIndex=await readFile(new URL('staff/editor/index.html',output),'utf8');
 await put('staff/editor/index.html',guidedIndex.replace('<body>','<body data-guided="true">').replace('</head>','<link rel="stylesheet" href="guided-editor.css"></head>'));

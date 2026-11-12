@@ -1,9 +1,9 @@
+import { readTestBackup as unpackTour, startBackupDownload } from './backup-probe-tools.mjs';
 import assert from 'node:assert/strict';
 import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-import {unpackTour} from '../dist/tour-package.js';
 import {resetLayout,restoreLayout,captureLayout,visitorManifest} from '../dist/layout-state.js';
 const origin=process.env.PILOT_PROBE_ORIGIN??'http://localhost:4193',house=undefined;
 const pass=process.env.PILOT_PROBE_STAFF??(origin==='http://localhost:4193'?'Synthetic KV prototype staff only':null);
@@ -50,7 +50,7 @@ try{
  await pc.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();assert.equal(await pc.locator('#room-tabs .room-tab').count(),8);await pc.locator('#review-summary').click();const row=pc.locator('#review-items .review-item').filter({hasText:'Mudroom: Not connected'});await save(pc,()=>row.getByRole('button',{name:'Exclude unused stitch',exact:true}).click());assert.equal(await pc.locator('#room-tabs .room-tab').count(),7);assert.equal((await draft()).photos[unused],d.photos[unused]);assert.equal((await api(pc,'offline')).apartments.some(a=>a.id===id),true);const manifest=await api(pc,'offline/'+id+'/manifest');assert.equal(manifest.tour.rooms.length,7);assert.equal(manifest.images.length,7);
  await undo();assert.equal(await pc.locator('#room-tabs .room-tab').count(),8);
  await pc.getByRole('button',{name:'4. Preview & Publish',exact:true}).click();await save(pc,()=>pc.locator('#review-items .review-item').filter({hasText:'Mudroom: Not connected'}).getByRole('button',{name:'Exclude unused stitch',exact:true}).click());await pc.getByRole('button',{name:'1. Upload Stitches',exact:true}).click();
- const [download]=await Promise.all([pc.waitForEvent('download'),pc.getByRole('button',{name:'Export Backup',exact:true}).click()]);const bytes=await readFile(await download.path()),round=await unpackTour(new Blob([bytes]));assert.equal(round.tour.rooms.length,8);assert.equal(round.images.size,8);assert.deepEqual(round.tour,(await draft()).tour);await writeFile(join(root,'verified-panorama.shtour'),bytes);
+ const [download]=await Promise.all([pc.waitForEvent('download'),startBackupDownload(pc,pc.getByRole('button',{name:'Export Backup',exact:true}))]);const bytes=await readFile(await download.path()),round=await unpackTour(new Blob([bytes]));assert.equal(round.tour.rooms.length,8);assert.equal(round.images.size,8);assert.deepEqual(round.tour,(await draft()).tour);await writeFile(join(root,'verified-panorama.shtour'),bytes);
  mobile=await login(edge,true);await mobile.goto(origin+'/staff/editor/?apartment='+id);await mobile.locator('#guide-title').waitFor();await mobile.getByRole('button',{name:'2. Connect Rooms',exact:true}).click();assert.deepEqual((await draft(mobile)).tour,round.tour);await choose(mobile,source);awaitCurrent=source;await checkPoint(mobile,target,await drop(mobile,target,{touch:true}));await undo(mobile);await mobile.screenshot({path:join(root,'connect-folded.png')});await mobile.setViewportSize({width:900,height:900});await mobile.screenshot({path:join(root,'connect-unfolded.png')});
  console.log('PASS eight uploads directly to panorama, exact outgoing/drop persistence, only reciprocal pending, seven connected viewpoints, graph-generated map/no phantom doors, move/regenerate/Undo, collapsed/named review, unused preview/exclusion, offline projection, eight-JPEG backup and Edge/Fold retrieval; no guest publication.');
 }finally{
