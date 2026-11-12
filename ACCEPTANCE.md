@@ -107,3 +107,15 @@ Toolbar follow-up: authenticated HTML now contains the existing sharing toolbar 
 
 
 Sharing simplification (2026-11-09): SMS controls and SMS URI generation are removed. Email is labeled as opening an external mail app; direct sending and Gmail API authorization are not implemented. Copy Invitation includes the required phrase. QR, group selection, calendar expiration and management remain. Historical SMS acceptance entries describe the previous interface, not a current feature.
+
+
+### UAC owner direction — 12 November 2026
+
+The public Client Gallery is deferred. Keep the app login-only and preserve private guest invitations. Administrator UAC configures Staff defaults, individual overrides and apartment scope; Client remains a reserved read-only context without accounts. No Gmail API, SMS, recipient restrictions, approval workflow or new presentation/offline feature is included. See STAFF.md and UAC-AUDIT.md for current behavior and rollout/rollback details. Earlier public-gallery tasks are superseded.
+
+
+### Login-only UAC acceptance — 12 November 2026
+
+72 automated regressions pass. Live Chromium/independent Edge passed Admin role/individual/scope/history controls, fresh policy enforcement, synthetic promotion/demotion and disable/session revocation, scoped Staff read-only viewing/permitted editing, cross-apartment API/image denials and private guest isolation. Existing sharing/QR/expiry/revocation, exact doorway editing/Undo, eight-viewpoint panorama/grid/backup, full backup replacement/publication isolation and encrypted offline restart/failure/reconnect probes pass. Public Client Gallery remains absent by owner decision. No offline storage or UI change.
+
+Rollback off/on was rehearsed; 71 hosted assets and the Worker module are byte-identical to the candidate build. Original records and all 393 prior KV keys survive; original credentials, roles, apartment versions, publication visibility and invitation permissions are unchanged. Sessions/rate-limit counters change normally. Current dashboard confirmed Workers Free. A sanitized tail observed 68 public Worker executions (max 5 ms CPU) and 39 private object executions including scrypt (max 323 ms); all 107 outcomes were normal. These bounded samples do not guarantee worst-case Free compliance or establish peak memory/account-wide daily consumption; Issue #12 remains open. Physical Fold acceptance and agency rollout approvals remain separate gates.

@@ -133,3 +133,14 @@ Individual cards offer new invitation creation after confirmation when usable cr
 ### Toolbar availability
 
 The Guest Links toolbar is now part of the authenticated HTML response, above the gallery. It remains visible before JavaScript initializes; sharing interactions still require JavaScript. Group / Mass Share toggles the submenu, selection checkboxes and highlighted button. Zero-selection creation is disabled. If controls are missing, confirm the page is /staff/guest-links rather than /staff (Apartment Gallery), then reload. No missing-control root cause was reproduced in a fresh live session; see LOGBOOK.md for baseline and verification evidence.
+
+
+## Administrator permissions and Staff access
+
+The site remains login-only. Client is a reserved read-only role; there is no public apartment gallery or public registration. Existing private invitations still work for recipients selected by staff/supervisors. Copy Link and Copy Invitation remain available; Email opens a prepared message in an external mail app. There are no recipient allowlists, domain checks, approval steps, Gmail integration or SMS.
+
+Administrators open **User Access Control** from the Gallery. **Users** shows status, last recorded login, effective permissions and role assignment. **Staff Accounts** retains account creation, reset and enable/disable. A role change ends that account's sessions; the final active Administrator cannot be demoted or disabled. The stored `editor` label is retained only for compatibility and displayed as Staff.
+
+**Role Permissions** sets ordinary role defaults; protected Administrator controls and Client authoring restrictions cannot be delegated. **Individual Permissions** chooses Inherit, Allow or Deny for ordinary actions and explains the current result. Protected Administrator actions cannot be delegated. **Apartment Access** chooses All or Selected apartments; filtering preserves selection until explicit Save. An individual Allow does not bypass an apartment restriction. A newly created apartment is automatically included in a permitted creator's selected assignment. **Access History** shows recent policy changes and activity without secrets. Save changes explicitly; concurrent stale saves require reloading.
+
+Staff see assigned apartments and permitted controls. Viewing without editing opens the existing tour preview read-only. Direct API requests are also checked, including private images, invitations, publication and backup workflows. Permission changes apply to subsequent online requests; reload to refresh visible controls after an Administrator changes access. Offline downloading/vault behavior is unchanged, and disconnected copies retain the previously documented expiry/revocation limitations.

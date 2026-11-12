@@ -59,3 +59,8 @@ To recover an existing apartment while keeping its guest-link selection, first e
 The automated hosted rehearsal exported through the real catalog, removed the disposable source draft, restored it through the import form, compared the complete manifest and every JPEG byte, and retrieved the restored tour in independent Edge. It also tested replacement of a published synthetic fixture while its guest publication remained unchanged. Synthetic fixtures, invitations and disposable apartments were withdrawn afterward.
 
 Tour packages omit staff accounts, roles, guest links, sessions and server secrets. The authorized operator separately backs up D1 and retains required secrets securely; see [ACCEPTANCE.md](ACCEPTANCE.md). Do not store D1 exports or secrets beside public source code.
+
+
+### UAC owner direction — 12 November 2026
+
+The public Client Gallery is deferred. Keep the app login-only and preserve private guest invitations. Administrator UAC configures Staff defaults, individual overrides and apartment scope; Client remains a reserved read-only context without accounts. No Gmail API, SMS, recipient restrictions, approval workflow or new presentation/offline feature is included. See STAFF.md and UAC-AUDIT.md for current behavior and rollout/rollback details. Earlier public-gallery tasks are superseded.

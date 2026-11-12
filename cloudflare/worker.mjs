@@ -1,3 +1,7 @@
+import {activityEnvelope,recordActivity} from './activity-audit.mjs';
+import {authorize,defaultPermissions,effectivePermission,PERMISSIONS,ROLES} from './access-policy.mjs';
+import {createPolicyStore} from './policy-store.mjs';
+import {enforceStaffRequest,visibleApartments,visibleInvitations} from './staff-request-policy.mjs';
 import {shareExpiration} from './share-expiration.mjs';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import words from './phrase-words.mjs';
@@ -101,13 +105,19 @@ async function derivePassword(env,url,operation,data) {
 }
 
 async function handleRequest(request,env,privateStaffOnly=false) {
+  const auditEnabled=env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
+  const envelope=auditEnabled?await activityEnvelope(request):null;
+  if(envelope?.sessionHash){const actor=await env.DB.withSession('first-primary').prepare('SELECT a.username FROM staff_sessions s JOIN staff_accounts a USING(username) WHERE s.token=? AND s.revision=a.revision AND a.disabled=0 AND s.expires>?').bind(envelope.sessionHash,Date.now()).first();envelope.actor=actor?.username;}
   try {
     if (privateStaffOnly && env.STAFF_AUTH_MODE==='password' && new URL(request.url).origin===passwordWorkOrigin) {
       return await passwordWork(request);
     }
-    return await route(request,env,privateStaffOnly);
+    const response=await route(request,env,privateStaffOnly);
+    if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);}
+    return response;
   }
   catch (error) {
+    if(envelope)try{await recordActivity(env.DB.withSession('first-primary'),envelope,error.status||500);}catch{}
     if (!error.status) console.error('Prototype request failed:',error.message);
     return output({error:error.status ? error.message : 'The prototype could not complete this request.'},error.status || 500);
   }
@@ -150,7 +160,7 @@ async function route(request,env,privateStaffOnly) {
     const forwarded=new Request(request);
     // Only ingress supplies this identity; callers cannot choose distributed rate buckets.
     forwarded.headers.set('X-Staff-Login-Client',request.headers.get('CF-Connecting-IP') || 'local');
-    return env.STAFF_LOGIN.getByName('tour-api-v2').fetch(forwarded);
+    return env.STAFF_LOGIN.getByName(env.TOUR_UAC==='1'?'tour-api-uac-v1':'tour-api-v2').fetch(forwarded);
   }
   if (!privateStaffOnly && privateStaffRoute && (passwordAccounts || env.STAFF_LOGIN_BACKEND==='durable-object')) {
     if (!env.STAFF_LOGIN) fail(503,'Staff service is temporarily unavailable.');
@@ -233,7 +243,10 @@ async function route(request,env,privateStaffOnly) {
   }
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
-  if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); return asset('/sharing/staff.html'); }
+  if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); if(env.TOUR_UAC==='1'){const p=await createPolicyStore(db).principal(await staff());if(!effectivePermission(p,'invitation.view').allowed&&!effectivePermission(p,'invitation.create').allowed)fail(403,'Invitation access denied.');} return asset('/sharing/staff.html'); }
+  if(method==='GET'&&['/staff/uac','/sharing/uac.js','/sharing/uac.css'].includes(path)){
+    const a=await requireStaff();if(env.TOUR_UAC!=='1'||a.role!=='administrator')fail(403,'Administrator access required.');return asset(path==='/staff/uac'?'/sharing/uac.html':path);
+  }
   if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});
   if (method==='GET' && (path==='/staff/accounts' || path==='/sharing/staff-accounts.js')) {
     const account=await staff();
@@ -245,12 +258,17 @@ async function route(request,env,privateStaffOnly) {
   if (method==='GET' && ['/staff/editor/','/staff/editor/index.html'].includes(path) && !await staff()) {
     return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
   }
+  if(env.TOUR_UAC==='1'&&method==='GET'&&['/staff/editor/','/staff/editor/index.html','/staff/editor/legacy.html'].includes(path)){
+    const a=await requireStaff(),p=await createPolicyStore(db).principal(a),apartment=url.searchParams.get('apartment');
+    const action=url.searchParams.has('new')?'apartment.create':url.searchParams.has('view')?'apartment.view':'apartment.edit';
+    const result=authorize(p,action,apartment?{id:apartment}:undefined);if(!result.allowed)fail(403,'This editor operation is not permitted.');
+  }
   if (method==='GET' && path==='/guest') return asset('/sharing/guest.html');
   if (method==='GET' && /^\/offline\/(?:app\.webmanifest|sw\.js|offline(?:-store)?\.js|offline\.css|icon-(?:192|512)\.png|styles\.css|app\.js|tour-data\.js|room-grid\.js|builder-data\.js|graph-tour\.js|layout-state\.js|vendor\/marzipano\.js)?$/.test(path)) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
-  if (method==='GET' && ['/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css'].includes(path)) { await requireStaff(); return asset(path); }
+  if (method==='GET' && ['/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css','/sharing/access-ui.js'].includes(path)) { await requireStaff(); return asset(path); }
   if (method==='GET' && (/^\/sharing\/(staff|worker-import)\.js$/.test(path) || path.startsWith('/staff/editor/'))) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
@@ -345,6 +363,41 @@ async function route(request,env,privateStaffOnly) {
   }
   if (path.startsWith('/api/staff/')) {
     const account=await requireStaff();
+    let requestPrincipal=null;
+    if(env.TOUR_UAC==='1'){
+      if(!passwordAccounts)fail(503,'UAC requires independent staff accounts.');
+      requestPrincipal=await createPolicyStore(db).principal(account);
+      const input=['POST','PATCH','PUT'].includes(method)&&!['/api/staff/photos','/api/staff/sign-out'].includes(path)?await json(request.clone()):{};
+      const rule=await enforceStaffRequest(requestPrincipal,method,path,input,async share=>(await all('SELECT apartment FROM permissions WHERE share=?',share)).map(r=>r.apartment));
+      if(method==='GET'&&!effectivePermission(requestPrincipal,'apartment.private.view').allowed)for(const apartment of rule.apartments??[]){if(await one('SELECT 1 FROM versions WHERE apartment=? AND available<? AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=?) LIMIT 1',apartment,draftOnly,apartment))fail(403,'Private published viewing is not permitted.');}
+
+    }
+    if(path==='/api/staff/me'&&method==='GET'){
+      if(!requestPrincipal)return output({role:account.role,permissions:null});
+      return output({username:account.username,role:requestPrincipal.role,permissions:Object.fromEntries(Object.keys(PERMISSIONS).map(a=>[a,effectivePermission(requestPrincipal,a).allowed]))});
+    }
+    if(path==='/api/staff/uac'){
+      if(!requestPrincipal||requestPrincipal.role!=='administrator')fail(403,'Administrator UAC required.');
+      const policies=createPolicyStore(db);
+      if(method==='GET'){
+        const policyRows=await all('SELECT key,value,revision FROM uac_policy ORDER BY key');
+        const accounts=await all('SELECT a.username,a.role,a.disabled,a.revision,h.last_login FROM staff_accounts a LEFT JOIN staff_login_history h USING(username) ORDER BY a.username');
+        return output({roles:ROLES,defaults:Object.fromEntries(ROLES.map(r=>[r,defaultPermissions(r)])),permissions:PERMISSIONS,accounts:await Promise.all(accounts.map(a=>policies.inspect(a,policyRows))),policies:policyRows,apartments:await all('SELECT apartment AS id,title FROM versions WHERE seq=(SELECT MAX(v.seq) FROM versions v WHERE v.apartment=versions.apartment) ORDER BY title'),history:await all('SELECT * FROM access_history ORDER BY id DESC LIMIT 200'),activity:await all('SELECT * FROM activity_history ORDER BY id DESC LIMIT 200')});
+      }
+      if(method==='PATCH'){
+        const input=await json(request,2048),role=input.role==='staff'?'editor':input.role;
+        if(!['administrator','editor'].includes(role)||!usernamePattern.test(input.username)||!Number.isSafeInteger(input.expectedRevision))fail(400,'Choose an existing user, role and revision.');
+        const target=await one('SELECT role,revision FROM staff_accounts WHERE username=?',input.username);if(!target)fail(404,'User not found.');
+        try{const result=await db.batch([
+          stmt(`UPDATE staff_accounts SET role=?,revision=revision+1 WHERE username=? AND revision=? AND EXISTS(SELECT 1 FROM staff_accounts a JOIN staff_sessions s USING(username) WHERE a.username=? AND a.role='administrator' AND a.disabled=0 AND s.revision=a.revision AND s.token=? AND s.expires>?)`,role,input.username,input.expectedRevision,account.username,staffTokenHash,Date.now()),
+          stmt('INSERT INTO access_history(actor,target,previous,new_value,created) SELECT ?,?,?,?,? WHERE changes()=1',account.username,'role:'+input.username,JSON.stringify({role:target.role}),JSON.stringify({role}),Date.now())
+        ]);if(!result[0].meta.changes)fail(409,'User or session changed. Reload.');}catch(error){fail(409,error.message.includes('Last active')?'The last active Administrator must be preserved.':'Role change could not be saved. Reload.');}return output({ok:true});
+      }
+      if(method==='PUT'){
+        const input=await json(request);try{return output(await policies.save({username:account.username,sessionHash:staffTokenHash},input.key,input.value,input.expectedRevision));}catch(error){fail(error.message.includes('changed')?409:400,error.message);}
+      }
+      fail(405,'Unsupported UAC operation.');
+    }
     if (path==='/api/staff/accounts') {
       if (account.role!=='administrator') fail(403,'Administrator access required.');
       const administratorGuard=`EXISTS(SELECT 1 FROM ${staffAccountTable} a JOIN ${staffSessionTable} s USING(username)
@@ -409,15 +462,15 @@ async function route(request,env,privateStaffOnly) {
       return output({ok:true},200,setCookie(staffCookie,'',0,passwordAccounts || url.protocol==='https:'));
     }
     if (method==='GET' && path==='/api/staff/offline') {
-      const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,v.manifest,
+      const apartments=await all(`SELECT v.apartment AS id,v.title,CAST(v.seq AS TEXT) AS revision,v.manifest,EXISTS(SELECT 1 FROM versions p WHERE p.apartment=v.apartment AND p.available<? AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=v.apartment)) AS published,
         (SELECT SUM(p.bytes) FROM json_each(v.photos) j JOIN photos p ON p.id=j.value WHERE NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.builder.excluded') e WHERE e.value=j.key)) AS bytes
         FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
         AND json_array_length(v.manifest,'$.rooms')>0
         AND (json_extract(v.manifest,'$.grid.mode')='graph' OR (COALESCE(json_array_length(v.manifest,'$.builder.unplaced'),0)=0 AND COALESCE(json_array_length(v.manifest,'$.builder.missing'),0)=0
         AND NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.rooms') r,json_each(r.value,'$.links') l WHERE json_extract(l.value,'$.pending')=1)))
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
-        ORDER BY v.title`);
-      return output({apartments:apartments.flatMap(({manifest,...a})=>{try{validateApartment(JSON.parse(manifest));return [a];}catch{return [];}}),now});
+        ORDER BY v.title`,draftOnly);
+      return output({apartments:(requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments).flatMap(({manifest,...a})=>{try{validateApartment(JSON.parse(manifest));return [a];}catch{return [];}}),now});
     }
     const offline=/^\/api\/staff\/offline\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
     if (method==='GET' && offline) {
@@ -457,6 +510,7 @@ async function route(request,env,privateStaffOnly) {
       // Reservations count even if a write fails ambiguously, so parallel uploads cannot exceed the budget.
       await env.PHOTOS.put(photo,await blob.arrayBuffer());
       await run('UPDATE photos SET ready=1 WHERE id=? AND ready=0',photo);
+      if(requestPrincipal)await run('INSERT INTO photo_ownership(photo,username) VALUES(?,?)',photo,account.username);
       return output({id:photo,bytes:blob.size},201);
     }
     if (method==='POST' && path==='/api/staff/apartments') {
@@ -467,6 +521,15 @@ async function route(request,env,privateStaffOnly) {
       if (!photos || Object.keys(photos).length!==complete.length ||
           complete.some(room=>typeof photos[room.id]!=='string' || !idPattern.test(photos[room.id]))) fail(400,'One uploaded JPEG is required per complete viewpoint.');
       const ids=[...new Set(Object.values(photos))];
+      if(requestPrincipal&&replacement){const old=await current(replacement);if(old&&(Object.keys(JSON.parse(old.photos)).length!==Object.keys(photos).length||Object.entries(JSON.parse(old.photos)).some(([key,value])=>photos[key]!==value))&&!effectivePermission(requestPrincipal,'image.upload').allowed)fail(403,'Replacing images is not permitted.');}
+
+      if(requestPrincipal&&requestPrincipal.role!=='administrator'){
+        for(const photo of ids){
+          if(await one('SELECT 1 FROM photo_ownership WHERE photo=? AND username=?',photo,account.username))continue;
+          const references=await all('SELECT DISTINCT apartment AS id FROM versions v,json_each(v.photos) j WHERE j.value=?',photo);
+          if(!visibleApartments(requestPrincipal,references).length)fail(403,'Photo is outside your apartment access.');
+        }
+      }
       if (replacement && !idPattern.test(replacement)) fail(400,'Invalid apartment.');
       const apartment=replacement || id();
       if (replacement && (!Number.isSafeInteger(expectedVersion) || expectedVersion<1)) fail(409,'Reopen the latest apartment draft before saving.');
@@ -481,6 +544,7 @@ async function route(request,env,privateStaffOnly) {
           apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,apartment,prior,...ids,ids.length);
         if (!saved.meta.changes) fail(409,'Apartment or uploads changed. Reload and try again.');
       } catch(error) { if (error.message.includes('UNIQUE')) fail(409,'This apartment changed. Refresh and try again.'); throw error; }
+      if(requestPrincipal?.role==='staff'&&!replacement&&requestPrincipal.scope.mode==='selected')await run(`UPDATE uac_policy SET value=json_insert(value,'$.scope.apartments[#]',?),revision=revision+1,changed_by=?,changed_at=? WHERE key=? AND json_extract(value,'$.scope.mode')='selected'`,apartment,account.username,now,'user:'+account.username);
       return output({id:apartment,version:seq,available},201);
     }
     const staffTour=/^\/api\/staff\/tours\/([a-f0-9]{32})\/(manifest|thumbnail|images\/([a-z0-9-]+))$/.exec(path);
@@ -570,7 +634,8 @@ async function route(request,env,privateStaffOnly) {
         WHEN s.expires<=? THEN 'expired' ELSE 'active' END AS status,
         (SELECT json_group_array(p.apartment) FROM permissions p WHERE p.share=s.id) AS apartments
         FROM shares s ORDER BY s.expires DESC`,now);
-      return output({apartments,staffRole:account.role,shares:shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}))});
+      const invitations=shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}));
+      return output({apartments:requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments,staffRole:account.role,shares:requestPrincipal?visibleInvitations(requestPrincipal,invitations):invitations});
     }
     async function selection(apartments) {
       if (!Array.isArray(apartments) || !apartments.length || apartments.length>25 || new Set(apartments).size!==apartments.length ||

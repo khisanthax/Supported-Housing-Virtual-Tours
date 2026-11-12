@@ -34,7 +34,7 @@ async function refresh() {
   updateResetField();
   document.querySelector('#accounts').replaceChildren(...accounts.map(account => {
     const item = document.createElement('li');
-    item.textContent = account.username + ' · ' + account.role + (account.disabled ? ' · Disabled' : '');
+    item.textContent = account.username + ' · ' + (account.role==='editor'?'Staff':'Administrator') + (account.disabled ? ' · Disabled' : '');
     return item;
   }));
   const selected = manage.elements.username.value;

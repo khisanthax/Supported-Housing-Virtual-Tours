@@ -1,3 +1,4 @@
+import {getAccess,can,applyAccess} from '/sharing/access-ui.js';
 import {createArrowObjects,canDeletePair} from './arrow-objects.js';
 import {createUploadWorkspace} from './upload-workspace.js';
 import { loadDraft, saveDraft } from './tour-store.js';
@@ -16,6 +17,7 @@ const button=(text,action,cls='')=>{const b=el('button',text,cls);b.type='button
 function say(text){$('guide-status').textContent=text;}
 async function verify(blob){const {width,height}=await inspectJpeg(blob);if(blob.size>4*1024*1024||width>8192||height>4096)throw Error('Use a stitched 2:1 JPEG up to 4 MiB and 8192 × 4096.');const end=new Uint8Array(await blob.slice(-2).arrayBuffer());if(end[0]!==255||end[1]!==217)throw Error('JPEG is truncated.');const url=URL.createObjectURL(blob);try{const img=new Image();img.src=url;await img.decode();}finally{URL.revokeObjectURL(url);}}
 export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pausePanning}) {
+  const access=await getAccess();
   document.body.classList.add('guided');
   const oldMain=document.querySelector('body>main');oldMain.hidden=true;document.querySelector('body>.header').hidden=true;
   const shell=el('div',null,'guided-shell');
@@ -24,6 +26,7 @@ export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pau
   for(const control of shell.querySelectorAll('button,input,select'))control.disabled=true;
   $('guide-viewer').append($('tour'),document.querySelector('.room-strip'));
   let draft,revision=0,selected,step=new URL(location.href).searchParams.has('view')?4:1,busy=false,urls=[],zoom=1,placement=null,replacementId;
+  if(!can(access,'apartment.edit'))step=4;
   const names=['Upload Stitches','Connect Rooms','Review Layout','Preview & Publish'];
   const saved=await loadDraft();
   if(saved){draft={tour:saved.tour,images:saved.images};revision=saved.revision;validateDraft(draft);draft.tour.builder??={version:1,unplaced:[],missing:[]};draft.tour.grid=gridFor(draft.tour);draft.tour.grid.version=2;}
@@ -55,7 +58,7 @@ export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pau
     $('guide-view-note').textContent=step===2?'Drag a destination room onto its actual doorway, or choose a handle and tap the doorway.':'Visitor preview. Publish only after reviewing every room and connection.';
   }
   function issues(){return reviewTour(draft.tour).filter(i=>i.severity==='blocker').map(i=>i.message);}
-  async function go(n){if(busy)return;objects.clear();doorDrag.cancel();step=n;cancelPlacement();if(n===3&&graphMode(draft.tour)&&draft.tour.rooms.some(r=>!draft.tour.grid.positions[r.id]&&!draft.tour.builder.excluded?.includes(r.id))){await change(t=>generateLayout(t.tour),'Layout generated from saved doorway connections.',undefined,'Generate layout');}if(n===3&&matchMedia('(max-width:620px)').matches){$('guide-workspace').classList.add('drawer-collapsed');$('guide-drawer').setAttribute('aria-expanded','false');}render();if((step===2||step===4))await view();}
+  async function go(n){if(busy)return;if(!can(access,'apartment.edit'))n=4;objects.clear();doorDrag.cancel();step=n;cancelPlacement();if(n===3&&graphMode(draft.tour)&&draft.tour.rooms.some(r=>!draft.tour.grid.positions[r.id]&&!draft.tour.builder.excluded?.includes(r.id))){await change(t=>generateLayout(t.tour),'Layout generated from saved doorway connections.',undefined,'Generate layout');}if(n===3&&matchMedia('(max-width:620px)').matches){$('guide-workspace').classList.add('drawer-collapsed');$('guide-drawer').setAttribute('aria-expanded','false');}render();if((step===2||step===4))await view();}
   function previewUrl(id){const blob=draft.images.get(id);if(!blob)return '';const url=URL.createObjectURL(blob);urls.push(url);return url;}
   function select(id){selected=id;render();$('filmstrip').querySelector('.stitch-card.selected')?.scrollIntoView({block:'nearest',inline:'nearest'});}
   function startDrag(event,id){
@@ -164,6 +167,6 @@ export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pau
   $('guide-undo').onclick=async()=>{const entry=history.latest;if(!entry||busy)return;try{await change(n=>restoreLayout(n.tour,entry.layout),'Undid '+entry.label+'.');history.applied();syncUndo();const focus=history.latest?$('guide-undo'):document.querySelector('.destination-handle:not(:disabled)')??$('guide-steps').querySelector('[aria-current=step]');focus?.focus({preventScroll:true});}catch(error){say(error.message);}};
   new ResizeObserver(()=>{if((step===1||step===3))renderGridSize();}).observe($('guide-grid-viewport'));
   function renderGridSize(){const board=$('guide-grid');if(!board.children.length)return;const cols=Number(board.dataset.cols),rows=Number(board.dataset.rows),v=$('guide-grid-viewport');const cell=Math.max(110,Math.min(Math.max(220,v.clientWidth-16)/cols,Math.max(250,v.clientHeight-16)/rows))*zoom;board.style.transform='';if(Math.abs(parseFloat(board.style.width)-cols*cell)>1)render();}
-  lockControls(false);render();await go(step);say('Private draft ready. Changes save automatically.');
-  return { get editing(){return step===2;},roomChanged(r){if((step===2||step===4)){selected=r.id;if(placement&&placement.id!==r.id)cancelPlacement();doorDrag.decorate(draft.tour.rooms);}},bindDoorDrag(node,index,target){doorDrag.bindArrow(node,index,target);objects.bind(node,index);},inspectDoor(index,node){objects.inspect(node,index);},selectDoor(index){const r=currentRoom();if(r){selected=r.id;beginDoor(r.links[index].target,index);}} };
+  lockControls(false);render();await go(step);applyAccess(access);say('Private draft ready. Changes save automatically.');
+  return { get editing(){return step===2&&can(access,'apartment.edit');},roomChanged(r){if((step===2||step===4)){selected=r.id;if(placement&&placement.id!==r.id)cancelPlacement();doorDrag.decorate(draft.tour.rooms);}},bindDoorDrag(node,index,target){doorDrag.bindArrow(node,index,target);objects.bind(node,index);},inspectDoor(index,node){objects.inspect(node,index);},selectDoor(index){const r=currentRoom();if(r){selected=r.id;beginDoor(r.links[index].target,index);}} };
 }
