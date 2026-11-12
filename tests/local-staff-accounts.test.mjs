@@ -360,6 +360,11 @@ test('opt-in UAC enforcement rejects direct scoped APIs and rechecks live role p
  assert.equal((await request('/api/staff/drafts/'+a,{cookie})).status,403);
  database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'apartment.view':'allow'}}),'user:staff');
  assert.equal((await request('/api/staff/drafts/'+a,{cookie})).status,200);assert.equal((await request('/api/staff/drafts/'+b,{cookie})).status,403);
+ database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'apartment.view':'allow','apartment.private.view':'deny','backup.import':'deny','image.upload':'deny'}}),'user:staff');
+ assert.equal((await request('/api/staff/tours/'+a+'/manifest',{cookie})).status,403);
+ assert.equal((await request('/api/staff/offline/'+a+'/manifest',{cookie})).status,403);
+ assert.equal((await request('/api/staff/photos',{cookie,method:'POST',body:{}})).status,403);
+ assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',body:{purpose:'import',replacement:a,tour,photos:{},expectedVersion:1}})).status,403);
  assert.equal((await request('/api/staff/unknown-operation',{cookie,method:'POST',body:{}})).status,403);
  assert.equal((await request('/api/staff/accounts',{cookie})).status,403);
  assert.equal((await request('/api/staff/uac',{cookie})).status,403);

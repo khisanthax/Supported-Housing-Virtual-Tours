@@ -232,7 +232,7 @@ await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',outp
 
 await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',output),'utf8')).replace('<main>','<main>'+await readFile(new URL('cloudflare/sharing-workspace.html',root),'utf8')));
 
-for(const name of ['uac.html','uac.js','access-ui.js'])await copy('cloudflare/'+name,'sharing/'+name);
+for(const name of ['uac.html','uac.js','uac.css','access-ui.js'])await copy('cloudflare/'+name,'sharing/'+name);
 for(const path of ['sharing/gallery.html','sharing/staff.html','staff/editor/index.html'])await put(path,(await readFile(new URL(path,output),'utf8')).replace('</head>','<script type="module" src="/sharing/access-ui.js"></script></head>'));
 
 await put('sharing/staff.js',"import {getAccess,applyAccess} from '/sharing/access-ui.js';\nconst access=await getAccess();\n"+await readFile(new URL('sharing/staff.js',output),'utf8'));

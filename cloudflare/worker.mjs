@@ -244,7 +244,7 @@ async function route(request,env,privateStaffOnly) {
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
   if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); if(env.TOUR_UAC==='1'){const p=await createPolicyStore(db).principal(await staff());if(!effectivePermission(p,'invitation.view').allowed&&!effectivePermission(p,'invitation.create').allowed)fail(403,'Invitation access denied.');} return asset('/sharing/staff.html'); }
-  if(method==='GET'&&['/staff/uac','/sharing/uac.js'].includes(path)){
+  if(method==='GET'&&['/staff/uac','/sharing/uac.js','/sharing/uac.css'].includes(path)){
     const a=await requireStaff();if(env.TOUR_UAC!=='1'||a.role!=='administrator')fail(403,'Administrator access required.');return asset(path==='/staff/uac'?'/sharing/uac.html':path);
   }
   if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});

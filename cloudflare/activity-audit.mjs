@@ -8,7 +8,7 @@ export async function activityEnvelope(request){
  const action=['publish','unpublish','archive','remove','restore','reset','enable','disable'].includes(body.action)?body.action:null;
  const raw=request.headers.get('Cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith('__Host-sht_staff='))?.slice('__Host-sht_staff='.length);
  const sessionHash=raw?createHash('sha256').update(raw).digest('hex'):null;
- const username=/^[a-z0-9][a-z0-9._-]{2,39}$/.test(body.username??'')?body.username:null;
+ const username=/^[a-z0-9][a-z0-9._-]{2,63}$/.test(body.username??'')?body.username:null;
  return {action:found[1]+(action?'.'+action:''),resource:path.match(/[a-f0-9]{32}/)?.[0]??(found[1]==='staff.accounts'?username:null),sessionHash,username};
 }
 export async function recordActivity(db,envelope,status){
