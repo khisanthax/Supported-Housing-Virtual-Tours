@@ -1,3 +1,6 @@
+import {PERMISSIONS,ROLES} from './access-policy.mjs';
+import {createPolicyStore} from './policy-store.mjs';
+import {enforceStaffRequest,visibleApartments,visibleInvitations} from './staff-request-policy.mjs';
 import {shareExpiration} from './share-expiration.mjs';
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import words from './phrase-words.mjs';
@@ -345,6 +348,25 @@ async function route(request,env,privateStaffOnly) {
   }
   if (path.startsWith('/api/staff/')) {
     const account=await requireStaff();
+    let requestPrincipal=null;
+    if(env.TOUR_UAC==='1'){
+      if(!passwordAccounts)fail(503,'UAC requires independent staff accounts.');
+      requestPrincipal=await createPolicyStore(db).principal(account);
+      const input=['POST','PATCH','PUT'].includes(method)&&!['/api/staff/photos','/api/staff/sign-out'].includes(path)?await json(request.clone()):{};
+      await enforceStaffRequest(requestPrincipal,method,path,input,async share=>(await all('SELECT apartment FROM permissions WHERE share=?',share)).map(r=>r.apartment));
+    }
+    if(path==='/api/staff/uac'){
+      if(!requestPrincipal||requestPrincipal.role!=='administrator')fail(403,'Administrator UAC required.');
+      const policies=createPolicyStore(db);
+      if(method==='GET'){
+        const accounts=await all('SELECT username,role,disabled,revision FROM staff_accounts ORDER BY username');
+        return output({roles:ROLES,permissions:PERMISSIONS,accounts:await Promise.all(accounts.map(a=>policies.inspect(a))),policies:await all('SELECT key,value,revision FROM uac_policy ORDER BY key'),apartments:await all('SELECT apartment AS id,title FROM versions WHERE seq=(SELECT MAX(v.seq) FROM versions v WHERE v.apartment=versions.apartment) ORDER BY title'),history:await all('SELECT * FROM access_history ORDER BY id DESC LIMIT 200')});
+      }
+      if(method==='PUT'){
+        const input=await json(request);try{return output(await policies.save({username:account.username,sessionHash:staffTokenHash},input.key,input.value,input.expectedRevision));}catch(error){fail(error.message.includes('changed')?409:400,error.message);}
+      }
+      fail(405,'Unsupported UAC operation.');
+    }
     if (path==='/api/staff/accounts') {
       if (account.role!=='administrator') fail(403,'Administrator access required.');
       const administratorGuard=`EXISTS(SELECT 1 FROM ${staffAccountTable} a JOIN ${staffSessionTable} s USING(username)
@@ -417,7 +439,7 @@ async function route(request,env,privateStaffOnly) {
         AND NOT EXISTS(SELECT 1 FROM json_each(v.manifest,'$.rooms') r,json_each(r.value,'$.links') l WHERE json_extract(l.value,'$.pending')=1)))
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state IN (2,3))
         ORDER BY v.title`);
-      return output({apartments:apartments.flatMap(({manifest,...a})=>{try{validateApartment(JSON.parse(manifest));return [a];}catch{return [];}}),now});
+      return output({apartments:(requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments).flatMap(({manifest,...a})=>{try{validateApartment(JSON.parse(manifest));return [a];}catch{return [];}}),now});
     }
     const offline=/^\/api\/staff\/offline\/([a-f0-9]{32})\/(manifest|images\/([a-z0-9-]+))$/.exec(path);
     if (method==='GET' && offline) {
@@ -457,6 +479,7 @@ async function route(request,env,privateStaffOnly) {
       // Reservations count even if a write fails ambiguously, so parallel uploads cannot exceed the budget.
       await env.PHOTOS.put(photo,await blob.arrayBuffer());
       await run('UPDATE photos SET ready=1 WHERE id=? AND ready=0',photo);
+      if(requestPrincipal)await run('INSERT INTO photo_ownership(photo,username) VALUES(?,?)',photo,account.username);
       return output({id:photo,bytes:blob.size},201);
     }
     if (method==='POST' && path==='/api/staff/apartments') {
@@ -467,6 +490,13 @@ async function route(request,env,privateStaffOnly) {
       if (!photos || Object.keys(photos).length!==complete.length ||
           complete.some(room=>typeof photos[room.id]!=='string' || !idPattern.test(photos[room.id]))) fail(400,'One uploaded JPEG is required per complete viewpoint.');
       const ids=[...new Set(Object.values(photos))];
+      if(requestPrincipal&&requestPrincipal.role!=='administrator'){
+        for(const photo of ids){
+          if(await one('SELECT 1 FROM photo_ownership WHERE photo=? AND username=?',photo,account.username))continue;
+          const references=await all('SELECT DISTINCT apartment AS id FROM versions v,json_each(v.photos) j WHERE j.value=?',photo);
+          if(!visibleApartments(requestPrincipal,references).length)fail(403,'Photo is outside your apartment access.');
+        }
+      }
       if (replacement && !idPattern.test(replacement)) fail(400,'Invalid apartment.');
       const apartment=replacement || id();
       if (replacement && (!Number.isSafeInteger(expectedVersion) || expectedVersion<1)) fail(409,'Reopen the latest apartment draft before saving.');
@@ -570,7 +600,8 @@ async function route(request,env,privateStaffOnly) {
         WHEN s.expires<=? THEN 'expired' ELSE 'active' END AS status,
         (SELECT json_group_array(p.apartment) FROM permissions p WHERE p.share=s.id) AS apartments
         FROM shares s ORDER BY s.expires DESC`,now);
-      return output({apartments,staffRole:account.role,shares:shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}))});
+      const invitations=shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}));
+      return output({apartments:requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments,staffRole:account.role,shares:requestPrincipal?visibleInvitations(requestPrincipal,invitations):invitations});
     }
     async function selection(apartments) {
       if (!Array.isArray(apartments) || !apartments.length || apartments.length>25 || new Set(apartments).size!==apartments.length ||

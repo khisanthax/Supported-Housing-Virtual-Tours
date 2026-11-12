@@ -16,11 +16,12 @@ const editorPassword = 'Synthetic staff editor password';
 const replacementPassword = 'Synthetic replacement password';
 const digest = value => createHash('sha256').update(value).digest('hex');
 
-async function fixture(t) {
+async function fixture(t, { uac = false } = {}) {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-01-01T00:00:30Z') });
   const database = new DatabaseSync(':memory:');
   t.after(() => database.close());
   database.exec(await readFile(new URL('../cloudflare/schema.sql', import.meta.url), 'utf8'));
+  if(uac)database.exec(await readFile(new URL('../cloudflare/uac-schema.sql',import.meta.url),'utf8'));
   const d1 = {
     withSession(mode) {
       assert.equal(mode, 'first-primary');
@@ -52,7 +53,7 @@ async function fixture(t) {
     }
   };
   const env = {
-    DB: d1, SYNTHETIC_EDGE_PILOT: '1', PILOT_ORIGIN: origin, GUEST_CODE_KEY: 'a'.repeat(64),
+    TOUR_UAC:uac?'1':undefined, DB: d1, SYNTHETIC_EDGE_PILOT: '1', PILOT_ORIGIN: origin, GUEST_CODE_KEY: 'a'.repeat(64),
     STAFF_ACCOUNTS: '1', STAFF_AUTH_MODE: 'password', TOUR_API_BACKEND: 'durable-object'
   };
   const delegated = [];
@@ -72,11 +73,11 @@ async function fixture(t) {
     throw new Error('Password mode attempted an outbound request');
   });
   const request = (path, {
-    method = 'GET', cookie = '', body, ip = 'test', forwardedClient = '', requestOrigin = origin
+    method = 'GET', cookie = '', body, ip = 'test', forwardedClient = '', requestOrigin = origin, contentType='application/json'
   } = {}) => worker.fetch(new Request(origin + path, {
     method,
     headers: {
-      Cookie: cookie, Origin: requestOrigin, 'Content-Type': 'application/json',
+      Cookie: cookie, Origin: requestOrigin, 'Content-Type': contentType,
       'CF-Connecting-IP': ip, 'X-Staff-Login-Client': forwardedClient
     },
     body: body === undefined ? undefined : JSON.stringify(body)
@@ -342,4 +343,35 @@ test('local staff throttling, guest sessions and Firebase rollback remain isolat
   assert.equal((await signIn('new-name', editorPassword, { ip: 'new-ip' })).status, 429);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM attempts').get().count, before);
   assert.equal(outbound.mock.callCount(), 0);
+});
+
+
+test('opt-in UAC enforcement rejects direct scoped APIs and rechecks live role policy without changing credentials',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});
+ database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('staff',hashStaffPassword(editorPassword),'editor');
+ const cookie=session(await signIn('staff',editorPassword)),a='a'.repeat(32),b='b'.repeat(32),share='c'.repeat(32),tour=JSON.parse(await readFile(new URL('../cloudflare/sample.json',import.meta.url),'utf8'));
+ for(const apartment of [a,b])database.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?)').run(apartment,1,'Synthetic '+apartment[0],JSON.stringify(tour),'{}',Date.now()-1);
+ database.prepare('INSERT INTO uac_policy VALUES(?,?,1,?,?)').run('user:staff',JSON.stringify({scope:{mode:'selected',apartments:[a]}}),'synthetic-admin',Date.now());
+ let response=await request('/api/staff/dashboard',{cookie});assert.equal(response.status,200);assert.deepEqual((await response.json()).apartments.map(a=>a.id),[a]);
+ for(const path of ['drafts/'+b,'tours/'+b+'/manifest','tours/'+b+'/thumbnail','tours/'+b+'/images/living','offline/'+b+'/manifest'])assert.equal((await request('/api/staff/'+path,{cookie})).status,403);
+ assert.equal((await request('/api/staff/drafts/'+a,{cookie})).status,200);
+ assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',contentType:'text/plain',body:{replacement:b}})).status,415);
+ database.prepare('INSERT INTO uac_policy VALUES(?,?,1,?,?)').run('role:staff',JSON.stringify({'apartment.view':false}),'synthetic-admin',Date.now());
+ assert.equal((await request('/api/staff/drafts/'+a,{cookie})).status,403);
+ database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'apartment.view':'allow'}}),'user:staff');
+ assert.equal((await request('/api/staff/drafts/'+a,{cookie})).status,200);assert.equal((await request('/api/staff/drafts/'+b,{cookie})).status,403);
+ assert.equal((await request('/api/staff/unknown-operation',{cookie,method:'POST',body:{}})).status,403);
+ assert.equal((await request('/api/staff/accounts',{cookie})).status,403);
+ assert.equal((await request('/api/staff/uac',{cookie})).status,403);
+ assert.equal((await request('/api/staff/cleanup',{cookie,method:'POST',body:{}})).status,403);
+ database.prepare('UPDATE staff_accounts SET disabled=1,revision=revision+1 WHERE username=?').run('staff');assert.equal((await request('/api/staff/dashboard',{cookie})).status,401);
+});
+
+
+test('UAC management API validates current Administrator sessions and returns no credential records',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');const cookie=session(await signIn('admin',adminPassword));
+ let response=await request('/api/staff/uac',{cookie});assert.equal(response.status,200);const data=await response.json();assert.equal(data.roles.length,3);assert.ok(!JSON.stringify(data).includes('password_verifier'));
+ const body={key:'role:staff',value:{'image.upload':false},expectedRevision:0};assert.equal((await request('/api/staff/uac',{cookie,method:'PUT',body})).status,200);assert.equal((await request('/api/staff/uac',{cookie,method:'PUT',body})).status,409);assert.equal(database.prepare('SELECT COUNT(*) n FROM access_history').get().n,1);
+ assert.equal((await request('/api/staff/uac',{cookie,method:'PUT',body:{key:'role:staff',value:{'accounts.manage':true},expectedRevision:1}})).status,400);
+ database.prepare('UPDATE staff_accounts SET revision=revision+1 WHERE username=?').run('admin');assert.equal((await request('/api/staff/uac',{cookie})).status,401);
 });

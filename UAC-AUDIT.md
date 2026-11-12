@@ -16,3 +16,8 @@ Private backup: D1 export and KV key inventory are stored under the operator's L
 ## Additive database phase
 
 `cloudflare/uac-schema.sql` is deliberately separate from the active schema and has not been applied remotely. `policy-store.mjs` provides validated, revision-checked policy persistence guarded by the current D1 Administrator session; audit triggers commit together with policy changes. Last-Administrator guards reside in SQLite so simultaneous demotions cannot remove the final active administrator. Public approval rows start absent and do not modify existing withdrawal state or private invitations. The migration was applied twice to the private restored backup without changing any existing table's contents. This does not yet authorize activating policy writes: complete scoped route enforcement and management integration first.
+
+
+## Opt-in Worker integration (12 November)
+
+The branch now connects request-policy enforcement and the Administrator policy API only when `TOUR_UAC=1`. This flag is absent from the live pilot; do not enable it for production testing yet. There is no migration auto-run. Local tests explicitly apply the additive schema before opting in. The endpoint matrix covers direct resource reads/writes, mixed-scope invitation management and filtering; uploaded-photo ownership is recorded and draft saves validate authorized references. Remaining work includes the user-facing permission interfaces, public Client viewer routes and approval management, complete operation-specific export/import/private-view semantics, role-assignment/audit integration and live migration/rollback/browser/CPU acceptance. This remains an incomplete draft, not a released permission system.
