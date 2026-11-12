@@ -53,3 +53,10 @@ Before enrolling real staff, test valid and invalid credentials, signup denial, 
 ### UAC owner direction — 12 November 2026
 
 The public Client Gallery is deferred. Keep the app login-only and preserve private guest invitations. Administrator UAC configures Staff defaults, individual overrides and apartment scope; Client remains a reserved read-only context without accounts. No Gmail API, SMS, recipient restrictions, approval workflow or new presentation/offline feature is included. See STAFF.md and UAC-AUDIT.md for current behavior and rollout/rollback details. Earlier public-gallery tasks are superseded.
+
+
+### UAC activation and rollback (verified 12 November 2026)
+
+Back up D1 privately and retain the immutable KV images and complete .shtour packages. Apply cloudflare/uac-schema.sql to the existing database with the existing ignored Wrangler pilot configuration. This is additive and idempotent; do not replace the database. Set TOUR_UAC=1 in that configuration and deploy prepared assets with the existing bindings, secrets and SQLite class. The API actor name changes, while D1/KV stay authoritative. No new Cloudflare service is required.
+
+To reverse policy activation, set TOUR_UAC=0 and redeploy the same tested source. This restores the previous role-based authorization, so review enabled test accounts first. Keep current data and additive tables; never import an old full database merely to roll back code. Live rehearsal verified the existing Administrator's login/dashboard and secure sign-in screen with UAC off, then restored UAC and verified all hosted bytes again. Previous configuration, Worker bundle and database export remain in protected operator storage outside Git.
