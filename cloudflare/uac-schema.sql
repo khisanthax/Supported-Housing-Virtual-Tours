@@ -34,3 +34,5 @@ CREATE TRIGGER IF NOT EXISTS preserve_last_administrator_delete BEFORE DELETE ON
  WHEN OLD.role='administrator' AND OLD.disabled=0
  AND NOT EXISTS(SELECT 1 FROM staff_accounts WHERE username<>OLD.username AND role='administrator' AND disabled=0)
  BEGIN SELECT RAISE(ABORT,'Last active Administrator must be preserved'); END;
+
+CREATE TABLE IF NOT EXISTS activity_history(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,resource TEXT,status INTEGER NOT NULL,created INTEGER NOT NULL);

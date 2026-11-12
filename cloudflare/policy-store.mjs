@@ -10,9 +10,9 @@ export function validatePolicy(key,value){
 }
 export function createPolicyStore(db){
  const stmt=(sql,...args)=>db.prepare(sql).bind(...args),one=(sql,...args)=>stmt(sql,...args).first();
- async function principal(account){
+ async function principal(account,suppliedRows){
   if(!account?.username||!normalizeRole(account.role))return null;
-  const role=normalizeRole(account.role),rows=(await stmt('SELECT key,value FROM uac_policy WHERE key IN (?,?)','role:'+role,'user:'+account.username).all()).results;
+  const role=normalizeRole(account.role),rows=suppliedRows?suppliedRows.filter(r=>r.key==='role:'+role||r.key==='user:'+account.username):(await stmt('SELECT key,value FROM uac_policy WHERE key IN (?,?)','role:'+role,'user:'+account.username).all()).results;
   const values=Object.fromEntries(rows.map(r=>[r.key,validatePolicy(r.key,JSON.parse(r.value))])),user=values['user:'+account.username]??{};
   return {...account,role,rolePolicy:values['role:'+role]??{},overrides:user.overrides??{},scope:user.scope??{mode:'all',apartments:[]}};
  }
@@ -20,7 +20,7 @@ export function createPolicyStore(db){
   validatePolicy(key,value);if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw Error('Invalid policy revision');
   const now=Date.now(),target=key.startsWith('user:')?key.slice(5):null;
   if(target&&!await one('SELECT 1 FROM staff_accounts WHERE username=?',target))throw Error('Unknown staff account');
-  for(const apartment of value.scope?.apartments??[]){if(!await one('SELECT 1 FROM versions WHERE apartment=? LIMIT 1',apartment))throw Error('Unknown apartment');}
+  const apartments=value.scope?.apartments??[];for(let i=0;i<apartments.length;i+=50){const batch=apartments.slice(i,i+50),row=await one('SELECT COUNT(DISTINCT apartment) n FROM versions WHERE apartment IN ('+batch.map(()=>'?').join(',')+')',...batch);if(row.n!==batch.length)throw Error('Unknown apartment');}
   // An INSERT/UPDATE is a single primary D1 transaction; audit trigger runs atomically.
   const result=await stmt(`INSERT INTO uac_policy(key,value,revision,changed_by,changed_at)
    SELECT ?,?,1,?,? WHERE EXISTS(SELECT 1 FROM staff_accounts a JOIN staff_sessions s USING(username)
@@ -30,6 +30,6 @@ export function createPolicyStore(db){
   if(!result.meta.changes)throw Error('Policy changed or Administrator session ended');
   return {revision:expectedRevision+1};
  }
- async function inspect(account){const p=await principal(account);if(!p)return null;return {...p,effective:Object.fromEntries(Object.keys(PERMISSIONS).map(action=>[action,effectivePermission(p,action)]))};}
+ async function inspect(account,suppliedRows){const p=await principal(account,suppliedRows);if(!p)return null;return {...p,effective:Object.fromEntries(Object.keys(PERMISSIONS).map(action=>[action,effectivePermission(p,action)]))};}
  return {principal,save,inspect};
 }

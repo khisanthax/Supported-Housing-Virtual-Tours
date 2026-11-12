@@ -2,13 +2,14 @@ import {authorize,effectivePermission,normalizeRole} from './access-policy.mjs';
 const hex='[a-f0-9]{32}';
 export function staffRequestPolicy(method,path,body={}){
  if(path==='/api/staff/sign-out'&&method==='POST')return {actions:[]};
+ if(path==='/api/staff/me'&&method==='GET')return {actions:[]};
  if(path==='/api/staff/accounts')return {actions:['accounts.manage']};
  if(path.startsWith('/api/staff/uac'))return {actions:[method==='GET'?'audit.view':'permissions.manage']};
- if(path==='/api/staff/dashboard'&&method==='GET')return {actions:['apartment.view'],list:'dashboard'};
+ if(path==='/api/staff/dashboard'&&method==='GET')return {actions:['apartment.view','inventory.restricted.view'],list:'dashboard'};
  if(path==='/api/staff/offline'&&method==='GET')return {actions:['apartment.view'],list:'apartments'};
  if(path==='/api/staff/photos'&&method==='POST')return {actions:['image.upload']};
  if(path==='/api/staff/cleanup'&&method==='POST')return {actions:['storage.cleanup'],global:true};
- if(path==='/api/staff/apartments'&&method==='POST')return {actions:[body.replacement?'apartment.edit':'apartment.create'],apartments:body.replacement?[body.replacement]:[],photos:body.photos};
+ if(path==='/api/staff/apartments'&&method==='POST')return {actions:[body.replacement?'apartment.edit':'apartment.create',...(body.purpose==='import'?['backup.import']:[])],apartments:body.replacement?[body.replacement]:[],photos:body.photos};
  let m=new RegExp('^/api/staff/(drafts|tours|offline)/('+hex+')(?:/(manifest|thumbnail|images/[a-z0-9-]+))?$').exec(path);
  if(m&&method==='GET')return {actions:['apartment.view',...(m[1]==='tours'&&m[3]==='manifest'?['backup.export']:[])],apartments:[m[2]]};
  m=new RegExp('^/api/staff/apartments/('+hex+')$').exec(path);
@@ -32,5 +33,5 @@ export async function enforceStaffRequest(principal,method,path,body,shareApartm
  for(const id of ids){const result=authorize(principal,rule.actions[0],{id});if(!result.allowed)deny('Apartment access denied');}
  return rule;
 }
-export function visibleApartments(principal,apartments){return apartments.filter(a=>authorize(principal,'apartment.view',{id:a.id}).allowed);}
+export function visibleApartments(principal,apartments){return apartments.filter(a=>authorize(principal,'apartment.view',{id:a.id}).allowed&&(!a.published||effectivePermission(principal,'apartment.private.view').allowed));}
 export function visibleInvitations(principal,invitations){if(!effectivePermission(principal,'invitation.view').allowed)return [];return invitations.filter(s=>s.apartments.length&&s.apartments.every(id=>authorize(principal,'apartment.view',{id}).allowed));}

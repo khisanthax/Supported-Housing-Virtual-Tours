@@ -375,3 +375,19 @@ test('UAC management API validates current Administrator sessions and returns no
  assert.equal((await request('/api/staff/uac',{cookie,method:'PUT',body:{key:'role:staff',value:{'accounts.manage':true},expectedRevision:1}})).status,400);
  database.prepare('UPDATE staff_accounts SET revision=revision+1 WHERE username=?').run('admin');assert.equal((await request('/api/staff/uac',{cookie})).status,401);
 });
+
+
+test('UAC role assignment preserves credentials, revokes sessions and guards the final Administrator',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});const verifier=hashStaffPassword(adminPassword);database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',verifier,'administrator');const cookie=session(await signIn('admin',adminPassword));
+ assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'admin',role:'staff',expectedRevision:1}})).status,409);
+ database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('second',verifier,'administrator');
+ assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'second',role:'client',expectedRevision:1}})).status,400);
+ assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'second',role:'staff',expectedRevision:1}})).status,200);assert.equal(database.prepare('SELECT password_verifier FROM staff_accounts WHERE username=?').get('second').password_verifier,verifier);assert.equal(database.prepare('SELECT role FROM staff_accounts WHERE username=?').get('second').role,'editor');
+ assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'admin',role:'staff',expectedRevision:1}})).status,409);
+ assert.ok(database.prepare('SELECT * FROM access_history WHERE target=?').get('role:second'));
+});
+test('UAC staff activity logging excludes passwords and cookies and preserves anonymous login-only entry',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');const cookie=session(await signIn('admin',adminPassword));
+ const response=await request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}});assert.equal(response.status,201);const created=await response.json();assert.ok(database.prepare('SELECT * FROM activity_history WHERE action=? AND resource=?').get('apartment.save',created.id));const audit=JSON.stringify(database.prepare('SELECT * FROM activity_history').all());assert.ok(!audit.includes(adminPassword)&&!audit.includes(cookie));assert.ok(database.prepare('SELECT last_login FROM staff_login_history WHERE username=?').get('admin'));
+ assert.equal((await request('/api/staff/me',{cookie})).status,200);assert.equal((await request('/client')).status,404);assert.equal((await request('/api/public/apartments')).status,404);assert.equal((await request('/staff/uac',{cookie:''})).status,401);
+});

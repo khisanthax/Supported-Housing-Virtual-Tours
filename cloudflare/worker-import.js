@@ -35,5 +35,5 @@ export async function importPackage(file,replacement,expectedVersion) {
   }
   const photos = {};
   for (const [room,jpeg] of images) photos[room] = (await send('photos',jpeg,'image/jpeg')).id;
-  await send('apartments',JSON.stringify({tour,photos,replacement,expectedVersion,draft:true}),'application/json');
+  await send('apartments',JSON.stringify({tour,photos,replacement,expectedVersion,draft:true,purpose:'import'}),'application/json');
 }
