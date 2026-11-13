@@ -5,6 +5,7 @@ export const PERMISSIONS=Object.freeze({
  'gallery.public.view':{client:true},'gallery.visibility.manage':{newCapability:true},'inventory.restricted.view':{},
  'invitation.create':{},'invitation.multi.create':{},'invitation.view':{},'invitation.revoke':{},'invitation.regenerate':{},
  'accounts.manage':{protected:true},'roles.assign':{protected:true},'permissions.manage':{protected:true},'scope.manage':{protected:true},'audit.view':{protected:true},'recovery.manage':{protected:true},
+ 'uploads.manage':{newCapability:true,individualOnly:true,adminAlways:true},
  'backup.export':{},'backup.import':{},'storage.cleanup':{}
 });
 export const normalizeRole=role=>role==='editor'?'staff':ROLES.includes(role)?role:null;
@@ -12,6 +13,8 @@ export function defaultPermissions(role){role=normalizeRole(role);return Object.
 export function effectivePermission({role,rolePolicy={},overrides={},disabled=false},action){
  role=normalizeRole(role);const definition=PERMISSIONS[action];
  if(disabled||!role||!definition)return {allowed:false,reason:'Disabled or unknown principal/permission'};
+ if(definition.adminAlways&&role==='administrator')return {allowed:true,reason:'Administrator queue management'};
+ if(definition.individualOnly)return {allowed:role==='staff'&&overrides[action]==='allow',reason:'Designated Staff supervisor override required'};
  if(definition.protected)return {allowed:role==='administrator',reason:'Protected Administrator boundary'};
  if(role==='client')return {allowed:!!definition.client,reason:'Read-only Client boundary'};
  const override=overrides[action];if(override==='allow'||override==='deny')return {allowed:override==='allow',reason:'Individual '+override};

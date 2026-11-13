@@ -9,6 +9,7 @@ async function request(path, options) {
 }
 
 export async function loadDraft() {
+  apartment=new URLSearchParams(location.search).get('apartment');
   if (!apartment) return null;
   const { tour, photos, revision } = await (await request('drafts/' + apartment)).json();
   const images = new Map(await Promise.all(tour.rooms.filter(r=>Object.hasOwn(photos,r.id)).map(async room => [
@@ -19,7 +20,7 @@ export async function loadDraft() {
   return { tour, images, revision };
 }
 
-export async function saveDraft({ tour, images }, revision, progress = () => {}) {
+export async function saveDraft({ tour, images }, revision, progress = () => {}, options = {}) {
   for (const image of images.values()) {
     if (image.size > 4 * 1024 * 1024) throw new Error('Each cloud JPEG must be 4 MiB or smaller.');
   }
@@ -28,7 +29,7 @@ export async function saveDraft({ tour, images }, revision, progress = () => {})
     let photo = savedPhotos.get(room);
     if (photo?.blob !== blob) {
       progress('Uploading ' + tour.rooms.find(item => item.id === room).name + ' (' + (uploaded.size + 1) + ' of ' + images.size + ')…');
-      const result = await request('photos', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+      const result = await request('photos'+(options.purpose==='uploads'?'?purpose=uploads&apartment='+apartment:''), { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
       photo = { blob, id: (await result.json()).id };
       savedPhotos.set(room, photo);
     }
@@ -39,7 +40,7 @@ export async function saveDraft({ tour, images }, revision, progress = () => {})
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tour, photos: Object.fromEntries([...uploaded].map(([room, photo]) => [room, photo.id])),
-      replacement: apartment, expectedVersion: revision, draft: true
+      replacement: apartment, expectedVersion: revision, draft: true,...(options.purpose==='uploads'?{purpose:'uploads'}:{})
     })
   });
   const result = await response.json();

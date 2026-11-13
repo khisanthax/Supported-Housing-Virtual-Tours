@@ -1,3 +1,5 @@
+import { appendUploadViewpoints } from '../dist/uploads-data.js';
+import { validatePolicy } from '../cloudflare/policy-store.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -22,6 +24,7 @@ async function fixture(t, { uac = false } = {}) {
   t.after(() => database.close());
   database.exec(await readFile(new URL('../cloudflare/schema.sql', import.meta.url), 'utf8'));
   if(uac)database.exec(await readFile(new URL('../cloudflare/uac-schema.sql',import.meta.url),'utf8'));
+  if(uac)database.exec(await readFile(new URL('../cloudflare/uploads-schema.sql',import.meta.url),'utf8'));
   const d1 = {
     withSession(mode) {
       assert.equal(mode, 'first-primary');
@@ -39,7 +42,7 @@ async function fixture(t, { uac = false } = {}) {
         }
       }) };
     },
-    batch(statements) {
+    async batch(statements) {
       // Execute each mock D1 batch atomically, including when logins overlap.
       database.exec('BEGIN');
       try {
@@ -99,6 +102,64 @@ function session(response) {
   assert.doesNotMatch(header, /(?:^|;\s*)Domain=/i);
   return header.split(';')[0];
 }
+
+test('Uploads queue requires individual supervisor designation, scoped membership, current revisions and non-destructive removal',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});
+ for(const [username,role,password] of [['admin','administrator',adminPassword],['staff','editor',editorPassword]])database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run(username,hashStaffPassword(password),role);
+ const admin=session(await signIn('admin',adminPassword)),staff=session(await signIn('staff',editorPassword)),a='a'.repeat(32),b='b'.repeat(32),tour=blankApartment();
+ for(const apartment of [a,b])database.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?)').run(apartment,1,'Synthetic '+apartment[0],JSON.stringify(tour),'{}',Number.MAX_SAFE_INTEGER);
+ const queue=async(cookie,action,apartments,expectedRevision)=>request('/api/staff/uploads',{cookie,method:'PATCH',body:{action,apartments,expectedRevision}});
+ assert.equal((await queue(staff,'add',[a],0)).status,403);
+ assert.throws(()=>validatePolicy('role:staff',{'uploads.manage':true}));
+ assert.equal((await queue(admin,'add',[a,b],0)).status,200);assert.equal((await queue(admin,'remove',[a],0)).status,409);
+ database.prepare('INSERT INTO uac_policy VALUES(?,?,1,?,?)').run('user:staff',JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'uploads.manage':'allow'}}),'admin',Date.now());
+ assert.equal((await queue(staff,'remove',[b],1)).status,403);
+ const before=database.prepare('SELECT * FROM versions').all();
+ assert.equal((await queue(staff,'remove',[a],1)).status,200);assert.deepEqual(database.prepare('SELECT * FROM versions').all(),before);
+ assert.equal((await queue(staff,'add',[a],2)).status,200);
+ assert.equal(database.prepare('SELECT role FROM staff_accounts WHERE username=?').get('staff').role,'editor');
+ assert.deepEqual((await(await request('/api/staff/uploads',{cookie:staff})).json()).apartments.map(a=>a.id),[a]);
+ database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{}}),'user:staff');
+ assert.equal((await queue(staff,'remove',[a],3)).status,403);
+ assert.equal((await request('/api/staff/uploads')).status,401);
+ assert.equal(database.prepare("SELECT COUNT(*) n FROM activity_history WHERE action='uploads.queue.add'").get().n,3);
+ assert.equal(database.prepare("SELECT COUNT(*) n FROM activity_history WHERE action='uploads.queue.remove'").get().n,1);
+});
+
+test('quick uploads enforce upload permission and queue on binary/save paths, add only unplaced viewpoints and preserve publication',async t=>{
+ const {database,env,request,signIn}=await fixture(t,{uac:true});
+ for(const [username,role,password]of [['admin','administrator',adminPassword],['staff','editor',editorPassword]])database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run(username,hashStaffPassword(password),role);
+ const admin=session(await signIn('admin',adminPassword)),staff=session(await signIn('staff',editorPassword)),a='a'.repeat(32),b='b'.repeat(32),tour=JSON.parse(await readFile(new URL('../cloudflare/sample.json',import.meta.url),'utf8'));
+ const photos=Object.fromEntries(tour.rooms.map((r,i)=>[r.id,String(i+1).repeat(32)]));for(const id of Object.values(photos))database.prepare('INSERT INTO photos VALUES(?,100,1)').run(id);
+ database.prepare('INSERT INTO versions VALUES(?,?,?,?,?,?)').run(a,1,tour.title,JSON.stringify(tour),JSON.stringify(photos),Date.now()-1);
+ const publication=database.prepare('SELECT * FROM versions').get();
+ database.prepare('INSERT INTO uac_policy VALUES(?,?,1,?,?)').run('user:staff',JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'apartment.edit':'deny'}}),'admin',Date.now());
+ await request('/api/staff/uploads',{cookie:admin,method:'PATCH',body:{action:'add',apartments:[a],expectedRevision:0}});
+ const next=appendUploadViewpoints(tour,['New stitch']),newPhoto='f'.repeat(32),nextPhotos={...photos,[next.ids[0]]:newPhoto};database.prepare('INSERT INTO photos VALUES(?,100,1)').run(newPhoto);database.prepare('INSERT INTO photo_ownership VALUES(?,?)').run(newPhoto,'staff');
+ const save=body=>request('/api/staff/apartments',{cookie:staff,method:'POST',body:{tour:next.tour,photos:nextPhotos,replacement:a,expectedVersion:1,purpose:'uploads',...body}});
+ assert.equal((await save({purpose:undefined})).status,403);
+ const corrupt=structuredClone(next.tour);corrupt.rooms[0].name='Tampered';assert.equal((await save({tour:corrupt})).status,400);
+ assert.equal((await save({photos:{...nextPhotos,[tour.rooms[0].id]:newPhoto}})).status,400);
+ assert.equal((await save({replacement:b})).status,403);
+ assert.equal((await save({})).status,201);assert.equal((await save({})).status,409);
+ assert.deepEqual(database.prepare('SELECT * FROM versions WHERE seq=1').get(),publication);
+ assert.ok((await(await request('/api/staff/uploads',{cookie:staff})).json()).apartments[0].lastUpload.count===1);
+ assert.ok(next.tour.builder.unplaced.includes(next.ids[0]));assert.deepEqual(next.tour.rooms.slice(0,tour.rooms.length),tour.rooms);
+ let puts=0;env.PHOTOS={put:()=>{puts++;}};
+ const jpeg=await readFile(new URL('../cloudflare/sample-images/living.jpg',import.meta.url));
+ const upload=()=>worker.fetch(new Request(origin+'/api/staff/photos?purpose=uploads&apartment='+a,{method:'POST',headers:{Cookie:staff,Origin:origin,'Content-Type':'image/jpeg'},body:jpeg}),env);
+ database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'image.upload':'deny'}}),'user:staff');
+ assert.equal((await upload()).status,403);assert.equal(puts,0);
+ database.prepare('UPDATE uac_policy SET value=? WHERE key=?').run(JSON.stringify({scope:{mode:'selected',apartments:[a]},overrides:{'apartment.edit':'deny'}}),'user:staff');
+ assert.equal((await upload()).status,201);assert.equal(puts,1);
+ for(let i=0;i<800;i++)database.prepare('INSERT INTO photo_age VALUES(?,?)').run('synthetic-quota-'+i,Date.now());
+ assert.equal((await upload()).status,429);assert.equal(puts,1);
+ assert.equal(database.prepare('SELECT MAX(seq) n FROM versions WHERE apartment=?').get(a).n,2);
+ await request('/api/staff/uploads',{cookie:admin,method:'PATCH',body:{action:'remove',apartments:[a],expectedRevision:1}});
+ assert.equal((await upload()).status,403);assert.equal(puts,1);assert.equal((await save({expectedVersion:2})).status,403);
+ assert.deepEqual(database.prepare('SELECT * FROM versions WHERE seq=1').get(),publication);
+ assert.ok(database.prepare("SELECT COUNT(*) n FROM activity_history WHERE resource=? AND action='uploads.photo' AND status=403").get(a).n>=2);
+});
 
 test('cloud graph publication and offline downloads project explicit exclusions while keeping the full shared draft',async t=>{
  const {database,env,request,signIn}=await fixture(t);

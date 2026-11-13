@@ -2,7 +2,7 @@
 
 Open /staff on your approved pilot URL. Direct links to the editor also open staff sign-in if the session has ended. This deployment is a synthetic pilot.
 
-See [the pilot handoff](PILOT.md) for the six-step Fold 7 checklist, account onboarding and recovery, first approved apartment import, and backup restoration before publication. `.shtour` packages are unencrypted; save them in the approved encrypted backup location.
+See [the pilot handoff](PILOT.md) for the six-step Fold 7 checklist, account onboarding and recovery, first approved apartment import, and backup restoration before publication. New `.shtour.zip` exports are password-encrypted; protect older plaintext `.shtour` files in approved storage.
 
 ## Initial administrator
 
@@ -147,3 +147,16 @@ Staff see assigned apartments and permitted controls. Viewing without editing op
 
 
 New backup exports are password-encrypted `.shtour.zip` files. Enter and confirm a separate backup password, store it separately, and restore through the app; older unencrypted `.shtour` imports remain supported. See [encrypted backup instructions and recovery limits](BACKUPS.md).
+
+
+## Uploads Gallery — collecting photos from phones and tablets
+
+An Administrator opens **Apartment Gallery → Manage Uploads**, checks apartment cards (including blank drafts), then chooses **Add Selected to Uploads** or **Remove Selected from Uploads**. List membership is separate from publication and guest invitations. Removal only removes the card from Uploads; it never deletes images, drafts or tours. Re-enter Manage Uploads to change the list. Historical demo records are individually selectable in this mode.
+
+To designate a Supervisor, use **User Access Control → Individual Permissions**, choose the Staff user, set **Manage Uploads Gallery (Supervisor) → Allow**, and save. Supervisor is still a Staff account with its existing apartment scope. This permission cannot be enabled for the entire Staff role. Administrators always retain queue management. Regular Staff see no Manage Uploads button and cannot change the list through APIs.
+
+Staff open **Uploads Gallery**, choose **Upload Photos**, and select completed stitched JPEGs or ZIPs. The same existing validation, thumbnail review, suggested names, duplicates, progress and Retry save apply. Add a viewpoint or Skip; replacement/deletion and room connections remain in the full editor. New images become Unplaced viewpoints in the selected apartment's private cloud draft. They are not published. Multiple viewpoints can share a room name. Existing photos, names, grid, arrows and guest publication stay intact. Upload permission and apartment scope are required even when queued; editor permission is not required for this additive workflow.
+
+After a stale revision error, cancel review, choose **Reload latest draft**, then select/review the files again. Ambiguous interrupted saves should also be checked by reloading; duplicate detection helps prevent accidental repeated additions. Failed photo writes may leave bounded unreferenced reservations for the existing safe cleanup process, but no failed save adds phantom viewpoints. New KV images may briefly need time to synchronize before another device loads them. Phone/tablet upload collection does not add mobile tour-authoring controls.
+
+The Gallery shows current draft photo counts and the most recent successful quick-upload summary. Access History records queue changes per apartment, binary upload attempts/failures and successful saved viewpoint counts. Local validation failures are shown on the device; invalid file bytes/names are not sent just to log them. Existing JPEG/ZIP/viewpoint and quota limits above still apply.

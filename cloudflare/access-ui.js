@@ -2,6 +2,7 @@ let cached;
 export const getAccess=()=>cached??=(async()=>{const r=await fetch('/api/staff/me');if(!r.ok)throw Error('Staff session ended. Sign in again.');return r.json();})();
 export function can(access,key){return access.permissions===null||!!access.permissions[key];}
 export function applyAccess(access){
+ if(access.permissions===null)for(const n of document.querySelectorAll('a[href="/staff/uploads"],#manage-uploads'))n.hidden=true;
  const rules=[['a[href="/staff/guest-links"],a[href^="/staff/guest-links?"]','invitation.view'],['a[href="/staff/accounts"],#staff-accounts','accounts.manage'],['a[href*="new=1"]','apartment.create'],['#cleanup','storage.cleanup'],['#import,#guide-import','backup.import'],['#guide-backup','backup.export'],['#guide-publish','apartment.publish'],['#guide-add-stitch,#guide-replace,.upload-drop,.guide-dialog input[type=file]','image.upload'],['.share-card-actions','invitation.create'],['#mass-toggle,#select-eligible','invitation.multi.create']];
  for(const [selector,key]of rules)if(!(key==='invitation.view'?(can(access,'invitation.view')||can(access,'invitation.create')):can(access,key)))for(const node of document.querySelectorAll(selector)){node.hidden=true;if(node.id==='guide-import')node.closest('label').hidden=true;}
  if(!can(access,'apartment.edit'))for(const node of document.querySelectorAll('.guide-actions,#guide-steps,#guide-prev,#guide-next,#guide-start,#tour-review'))node.hidden=true;
