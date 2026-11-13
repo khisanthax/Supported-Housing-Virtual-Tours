@@ -12,7 +12,7 @@ const digest = async file => {
   return [...new Uint8Array(hash)].join(',');
 };
 
-export async function reviewBatch(files, existing, verify, save) {
+export async function reviewBatch(files, existing, verify, save, { additiveOnly = false } = {}) {
   if (files.length > 24 || files.reduce((sum, file) => sum + file.size, 0) > 48 * 1024 * 1024) {
     throw new Error('Choose at most 24 files totaling at most 48 MiB.');
   }
@@ -31,7 +31,7 @@ export async function reviewBatch(files, existing, verify, save) {
   const title = element('h2', 'Review stitched panoramas');
   title.id = 'batch-title';
   dialog.setAttribute('aria-labelledby', title.id);
-  dialog.append(title, element('p', 'Add another viewpoint by using the same room name, or choose an existing viewpoint to replace. Capture frames need to be stitched before import.'));
+  dialog.append(title, element('p', additiveOnly?'Add new unplaced viewpoints only. Existing photos and doorways stay unchanged. Capture frames must be stitched first.':'Add another viewpoint by using the same room name, or choose an existing viewpoint to replace. Capture frames need to be stitched before import.'));
   const rows = [];
   const urls = [];
   for (const item of items) {
@@ -55,7 +55,7 @@ export async function reviewBatch(files, existing, verify, save) {
       if (duplicate) card.append(element('p', 'Exact duplicate of ' + duplicate + '. Skipped by default.'));
       const assignment = element('select');
       assignment.append(new Option('Add viewpoint', 'add'), new Option('Skip', 'skip'),
-        ...existing.tour.rooms.map(room => new Option('Replace ' + room.name + ' (' + room.id + ')', room.id)));
+        ...(additiveOnly?[]:existing.tour.rooms).map(room => new Option('Replace ' + room.name + ' (' + room.id + ')', room.id)));
       assignment.value = duplicate ? 'skip' : 'add';
       const name = element('input');
       name.maxLength = 80;
@@ -94,7 +94,7 @@ export async function reviewBatch(files, existing, verify, save) {
       cancel.onclick = () => dialog.close();
       saveButton.disabled = !rows.length;
       saveButton.onclick = async () => {
-        saveButton.disabled = cancel.disabled = true;
+        saveButton.disabled = cancel.disabled = true;for(const row of rows){row.name.disabled=true;row.assignment.disabled=true;}
         const chosen = rows.filter(row => row.assignment.value !== 'skip').map(row => ({
           name: row.name.value.trim(), assignment: row.assignment.value,
           file: row.file
@@ -107,7 +107,7 @@ export async function reviewBatch(files, existing, verify, save) {
           progress.textContent = error.message;
           saveButton.textContent = 'Retry save';
         } finally {
-          saveButton.disabled = cancel.disabled = false;
+          saveButton.disabled = cancel.disabled = false;for(const row of rows){row.assignment.disabled=false;row.name.disabled=row.assignment.value==='skip';}
         }
       };
       dialog.showModal();

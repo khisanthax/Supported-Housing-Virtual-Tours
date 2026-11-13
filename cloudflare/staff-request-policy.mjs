@@ -7,8 +7,10 @@ export function staffRequestPolicy(method,path,body={}){
  if(path.startsWith('/api/staff/uac'))return {actions:[method==='GET'?'audit.view':'permissions.manage']};
  if(path==='/api/staff/dashboard'&&method==='GET')return {actions:['apartment.view','inventory.restricted.view'],list:'dashboard'};
  if(path==='/api/staff/offline'&&method==='GET')return {actions:['apartment.view'],list:'apartments'};
- if(path==='/api/staff/photos'&&method==='POST')return {actions:['image.upload']};
+ if(path==='/api/staff/uploads')return method==='GET'?{actions:['apartment.view']} : method==='PATCH'?{actions:['uploads.manage'],apartments:body.apartments}:null;
+ if(path==='/api/staff/photos'&&method==='POST')return {actions:['image.upload'],apartments:body.purpose==='uploads'?[body.apartment]:[]};
  if(path==='/api/staff/cleanup'&&method==='POST')return {actions:['storage.cleanup'],global:true};
+ if(path==='/api/staff/apartments'&&method==='POST'&&body.purpose==='uploads')return {actions:['image.upload'],apartments:[body.replacement],photos:body.photos};
  if(path==='/api/staff/apartments'&&method==='POST')return {actions:[body.replacement?'apartment.edit':'apartment.create',...(body.purpose==='import'?['backup.import']:[])],apartments:body.replacement?[body.replacement]:[],photos:body.photos};
  let m=new RegExp('^/api/staff/(drafts|tours|offline)/('+hex+')(?:/(manifest|thumbnail|images/[a-z0-9-]+))?$').exec(path);
  if(m&&method==='GET')return {actions:['apartment.view',...(m[1]==='tours'&&m[3]==='manifest'?['backup.export']:[])],apartments:[m[2]]};

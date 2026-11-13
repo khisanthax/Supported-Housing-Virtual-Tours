@@ -2,7 +2,7 @@
 const selectedTours=new Set();let massMode=false,lastInvitation=null;
 const sharingShell=document.querySelector('.sharing-shell');
 const main=document.querySelector('main');for(const h of main.querySelectorAll(':scope>h1,:scope>p:not(#message)'))h.hidden=true;
-const sidebar=el('aside',null,'share-sidebar');sidebar.innerHTML='<h2>Virtual Tours</h2><p>Supported Housing</p><a href="/staff">⌂ Apartments</a><a href="/staff/editor/">▧ Upload Stitches</a><a href="/staff/guest-links" aria-current="page">↗ Guest Links</a><a href="/offline/">↓ Available Offline</a><a href="/staff">Backups & Settings</a>';document.body.prepend(sidebar);
+const sidebar=el('aside',null,'share-sidebar');sidebar.innerHTML='<h2>Virtual Tours</h2><p>Supported Housing</p><a href="/staff">⌂ Apartments</a><a href="/staff/editor/">▧ Upload Stitches</a><a href="/staff/uploads">↑ Uploads Gallery</a><a href="/staff/guest-links" aria-current="page">↗ Guest Links</a><a href="/offline/">↓ Available Offline</a><a href="/staff">Backups & Settings</a>';document.body.prepend(sidebar);
 $('catalog').closest('section').hidden=true;
 function shareButton(text,fn){const b=el('button',text);b.type='button';b.onclick=()=>operate(fn);return b;}
 function countSelection(){$('selected-count').textContent=selectedTours.size+' Selected';$('mass-create').disabled=!selectedTours.size;}

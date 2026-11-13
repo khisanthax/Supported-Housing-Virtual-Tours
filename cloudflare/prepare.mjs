@@ -43,7 +43,7 @@ for (const name of common) {
   await copy('dist/'+name,'staff/editor/'+name);
   await copy('dist/'+name,'offline/'+name);
 }
-for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js','encrypted-backup.js','backup-ui.js','vendor/backup-crypto.js']) await copy('dist/'+name,'staff/editor/'+name);
+for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js','encrypted-backup.js','backup-ui.js','vendor/backup-crypto.js','uploads-data.js']) await copy('dist/'+name,'staff/editor/'+name);
 await put('staff/editor/legacy.html',await readFile(new URL('staff/editor/index.html',output)));
 let guidedIndex=await readFile(new URL('staff/editor/index.html',output),'utf8');
 await put('staff/editor/index.html',guidedIndex.replace('<body>','<body data-guided="true">').replace('</head>','<link rel="stylesheet" href="guided-editor.css"></head>'));
@@ -232,7 +232,7 @@ await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',outp
 
 await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',output),'utf8')).replace('<main>','<main>'+await readFile(new URL('cloudflare/sharing-workspace.html',root),'utf8')));
 
-for(const name of ['uac.html','uac.js','uac.css','access-ui.js'])await copy('cloudflare/'+name,'sharing/'+name);
+for(const name of ['uac.html','uac.js','uac.css','access-ui.js','uploads.html','uploads.js','uploads.css'])await copy('cloudflare/'+name,'sharing/'+name);
 for(const path of ['sharing/gallery.html','sharing/staff.html','staff/editor/index.html'])await put(path,(await readFile(new URL(path,output),'utf8')).replace('</head>','<script type="module" src="/sharing/access-ui.js"></script></head>'));
 
 await put('sharing/staff.js',"import {getAccess,applyAccess} from '/sharing/access-ui.js';\nconst access=await getAccess();\n"+await readFile(new URL('sharing/staff.js',output),'utf8'));

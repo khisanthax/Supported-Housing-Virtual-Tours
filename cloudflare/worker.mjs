@@ -1,3 +1,5 @@
+import { uploadsApi } from './uploads-api.mjs';
+import { assertAdditiveUpload } from '../dist/uploads-data.js';
 import {activityEnvelope,recordActivity} from './activity-audit.mjs';
 import {authorize,defaultPermissions,effectivePermission,PERMISSIONS,ROLES} from './access-policy.mjs';
 import {createPolicyStore} from './policy-store.mjs';
@@ -113,6 +115,7 @@ async function handleRequest(request,env,privateStaffOnly=false) {
       return await passwordWork(request);
     }
     const response=await route(request,env,privateStaffOnly);
+    if(envelope?.action==='uploads.save'&&response.ok){const result=await response.clone().json();if(Number.isInteger(result.uploadedCount)&&result.uploadedCount>0&&result.uploadedCount<=12)envelope.action='uploads.saved.'+result.uploadedCount;}
     if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);}
     return response;
   }
@@ -244,6 +247,7 @@ async function route(request,env,privateStaffOnly) {
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
   if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); if(env.TOUR_UAC==='1'){const p=await createPolicyStore(db).principal(await staff());if(!effectivePermission(p,'invitation.view').allowed&&!effectivePermission(p,'invitation.create').allowed)fail(403,'Invitation access denied.');} return asset('/sharing/staff.html'); }
+  if(method==='GET'&&path==='/staff/uploads'){if(!await staff())return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});if(env.TOUR_UAC!=='1')fail(404,'Not found.');return asset('/sharing/uploads.html');}
   if(method==='GET'&&['/staff/uac','/sharing/uac.js','/sharing/uac.css'].includes(path)){
     const a=await requireStaff();if(env.TOUR_UAC!=='1'||a.role!=='administrator')fail(403,'Administrator access required.');return asset(path==='/staff/uac'?'/sharing/uac.html':path);
   }
@@ -268,7 +272,7 @@ async function route(request,env,privateStaffOnly) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
-  if (method==='GET' && ['/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css','/sharing/access-ui.js'].includes(path)) { await requireStaff(); return asset(path); }
+  if (method==='GET' && ['/sharing/uploads.js','/sharing/uploads.css','/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css','/sharing/access-ui.js'].includes(path)) { await requireStaff(); return asset(path); }
   if (method==='GET' && (/^\/sharing\/(staff|worker-import)\.js$/.test(path) || path.startsWith('/staff/editor/'))) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
@@ -367,11 +371,14 @@ async function route(request,env,privateStaffOnly) {
     if(env.TOUR_UAC==='1'){
       if(!passwordAccounts)fail(503,'UAC requires independent staff accounts.');
       requestPrincipal=await createPolicyStore(db).principal(account);
-      const input=['POST','PATCH','PUT'].includes(method)&&!['/api/staff/photos','/api/staff/sign-out'].includes(path)?await json(request.clone()):{};
+      let input=['POST','PATCH','PUT'].includes(method)&&!['/api/staff/photos','/api/staff/sign-out'].includes(path)?await json(request.clone()):{};
+      if(path==='/api/staff/photos'&&url.searchParams.get('purpose')==='uploads')input={purpose:'uploads',apartment:url.searchParams.get('apartment')};
       const rule=await enforceStaffRequest(requestPrincipal,method,path,input,async share=>(await all('SELECT apartment FROM permissions WHERE share=?',share)).map(r=>r.apartment));
       if(method==='GET'&&!effectivePermission(requestPrincipal,'apartment.private.view').allowed)for(const apartment of rule.apartments??[]){if(await one('SELECT 1 FROM versions WHERE apartment=? AND available<? AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=?) LIMIT 1',apartment,draftOnly,apartment))fail(403,'Private published viewing is not permitted.');}
 
     }
+    async function requireUploadQueue(apartment){if(!requestPrincipal||!idPattern.test(apartment??''))fail(403,'Authorized queued apartment required.');if(!await one("SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?",apartment))fail(403,'This apartment is no longer accepting uploads.');if(await one("SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)",apartment))fail(403,'Apartment is unavailable.');}
+    if(path==='/api/staff/uploads'){if(!requestPrincipal)fail(404,'Not found.');const input=method==='PATCH'?await json(request):{};return output(await uploadsApi({db,principal:requestPrincipal,username:account.username,sessionHash:staffTokenHash,method,input,list:async()=>visibleApartments(requestPrincipal,await uploadInventory()),fail}));}
     if(path==='/api/staff/me'&&method==='GET'){
       if(!requestPrincipal)return output({role:account.role,permissions:null});
       return output({username:account.username,role:requestPrincipal.role,permissions:Object.fromEntries(Object.keys(PERMISSIONS).map(a=>[a,effectivePermission(requestPrincipal,a).allowed]))});
@@ -492,6 +499,7 @@ async function route(request,env,privateStaffOnly) {
       return output({tour:offlineTour,revision,expires:now+offlineHours*hour,images});
     }
     if (method==='POST' && path==='/api/staff/photos') {
+      if(url.searchParams.get('purpose')==='uploads')await requireUploadQueue(url.searchParams.get('apartment'));
       if (request.headers.get('Content-Type')!=='image/jpeg') fail(415,'Send one stitched JPEG.');
       const blob=await limitedBody(request,MAX_JPEG);
       try {
@@ -514,7 +522,9 @@ async function route(request,env,privateStaffOnly) {
       return output({id:photo,bytes:blob.size},201);
     }
     if (method==='POST' && path==='/api/staff/apartments') {
-      const {tour,photos,replacement,expectedVersion}=await json(request);
+      const {tour,photos,replacement,expectedVersion,purpose}=await json(request);
+      let uploadedCount;
+      if(purpose==='uploads'){await requireUploadQueue(replacement);const previous=await current(replacement);if(!previous||previous.seq!==expectedVersion)fail(409,'Apartment changed. Reload before uploading again.');try{uploadedCount=assertAdditiveUpload(JSON.parse(previous.manifest),JSON.parse(previous.photos),tour,photos);}catch(error){fail(400,error.message);}}
       try { validateApartment(tour,{draft:true}); } catch (error) { fail(400,error.message); }
       if (tour.rooms.length>MAX_ROOMS) fail(400,'Tour is too large.');
       const complete= tour.rooms.filter(room=>!tour.builder?.missing.includes(room.id));
@@ -539,13 +549,14 @@ async function route(request,env,privateStaffOnly) {
       try {
         const saved=await run(`INSERT INTO versions SELECT ?,?,?,?,?,?
           WHERE NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))
+          ${purpose==='uploads'?'AND EXISTS(SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?)':''}
           AND COALESCE((SELECT MAX(seq) FROM versions WHERE apartment=?),0)=?
           AND (SELECT COUNT(*) FROM photos WHERE ready=1 AND id IN (${ids.map(()=>'?').join(',')||'NULL'}))=?`,
-          apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,apartment,prior,...ids,ids.length);
+          apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,...(purpose==='uploads'?[apartment]:[]),apartment,prior,...ids,ids.length);
         if (!saved.meta.changes) fail(409,'Apartment or uploads changed. Reload and try again.');
       } catch(error) { if (error.message.includes('UNIQUE')) fail(409,'This apartment changed. Refresh and try again.'); throw error; }
       if(requestPrincipal?.role==='staff'&&!replacement&&requestPrincipal.scope.mode==='selected')await run(`UPDATE uac_policy SET value=json_insert(value,'$.scope.apartments[#]',?),revision=revision+1,changed_by=?,changed_at=? WHERE key=? AND json_extract(value,'$.scope.mode')='selected'`,apartment,account.username,now,'user:'+account.username);
-      return output({id:apartment,version:seq,available},201);
+      return output({id:apartment,version:seq,available,...(uploadedCount?{uploadedCount}: {})},201);
     }
     const staffTour=/^\/api\/staff\/tours\/([a-f0-9]{32})\/(manifest|thumbnail|images\/([a-z0-9-]+))$/.exec(path);
     const lifecycle=/^\/api\/staff\/apartments\/([a-f0-9]{32})$/.exec(path);
@@ -621,8 +632,8 @@ async function route(request,env,privateStaffOnly) {
       }
       return output({versions:pruned.meta.changes,photos:deleted});
     }
-    if (method==='GET' && path==='/api/staff/dashboard') {
-      const apartments=await all(`SELECT v.apartment AS id,v.title,v.seq AS version,v.available,v.rowid AS recent,json_array_length(v.manifest,'$.rooms') AS viewpoints,
+    async function uploadInventory(){
+      return await all(`SELECT v.apartment AS id,v.title,v.seq AS version,v.available,(SELECT COUNT(*) FROM json_each(v.photos)) AS photoCount,v.rowid AS recent,json_array_length(v.manifest,'$.rooms') AS viewpoints,
         (SELECT COUNT(DISTINCT COALESCE(json_extract(r.value,'$.roomName'),json_extract(r.value,'$.name'))) FROM json_each(v.manifest,'$.rooms') r) AS roomCount,
         EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state=3) AS archived,
         NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment)
@@ -630,6 +641,9 @@ async function route(request,env,privateStaffOnly) {
         FROM versions v WHERE v.seq=(SELECT MAX(seq) FROM versions WHERE apartment=v.apartment)
           AND NOT EXISTS(SELECT 1 FROM apartment_visibility h WHERE h.apartment=v.apartment AND h.state=2)
         ORDER BY v.title`,draftOnly);
+    }
+    if (method==='GET' && path==='/api/staff/dashboard') {
+      const apartments=await uploadInventory();
       const shares=await all(`SELECT s.id,s.expires,s.revoked,CASE WHEN s.revoked IS NOT NULL THEN 'revoked'
         WHEN s.expires<=? THEN 'expired' ELSE 'active' END AS status,
         (SELECT json_group_array(p.apartment) FROM permissions p WHERE p.share=s.id) AS apartments
