@@ -125,12 +125,14 @@ async function handleRequest(request,env,privateStaffOnly=false) {
     }
     const response=await route(request,env,privateStaffOnly,diagnostic);
     if(envelope?.action==='uploads.save'&&response.ok){const result=await response.clone().json();if(Number.isInteger(result.uploadedCount)&&result.uploadedCount>0&&result.uploadedCount<=12)envelope.action='uploads.saved.'+result.uploadedCount;}
+    if(envelope&&diagnostic?.share)envelope.resource??=diagnostic.share;
     if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);if(diagnostic)diagnostic.auditId=auditId;}catch{diagnostic?.mark('database',{status:500});}}
     if(diagnostic&&envelope?.actor)diagnostic.actor=envelope.actor;
     return finish(response);
   }
   catch (error) {
     if(diagnostic&&envelope)diagnostic.actor=envelope.actor??(envelope.action==='staff.sign-in'&&envelope.username?'sign-in:'+envelope.username:diagnostic.actor);
+    if(envelope&&diagnostic?.share)envelope.resource??=diagnostic.share;
     if(envelope)try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,error.status||500);if(diagnostic)diagnostic.auditId=auditId;}catch{}
     if (!error.status) console.error('Request failed',diagnostic?.operation??'untraced',error.diagnosticCode??'UNEXPECTED_FAILURE');
     return finish(output({error:error.status ? error.message : 'The request could not be completed.'},error.status || 500),error);
@@ -229,7 +231,7 @@ async function route(request,env,privateStaffOnly,diag=null) {
   const requireGuest=async()=>{
     const session=await guest();
     if (!session) fail(401,'Reopen the guest link and enter its access code.');
-    return session.id;
+    if(diag){diag.share=session.id;diag.mark('authorization');}return session.id;
   };
   const current=(apartment,published=false)=>one(
     'SELECT * FROM versions WHERE apartment=?'+(published?' AND available<=?':'')+' ORDER BY seq DESC LIMIT 1',
@@ -370,6 +372,7 @@ async function route(request,env,privateStaffOnly,diag=null) {
     if (typeof token!=='string' || !tokenPattern.test(token) || typeof code!=='string') wrong();
     const share=await one('SELECT * FROM shares WHERE token=? AND revoked IS NULL AND expires>?',hash(token),now);
     if (!share) wrong();
+    if(diag){diag.share=share.id;diag.mark('authorization');}
     await throttle('share',share.id);
     let candidate;
     if (/^hmac-v1:[a-f0-9]{64}$/.test(share.verifier) && codePattern.test(code)) {
@@ -396,7 +399,7 @@ async function route(request,env,privateStaffOnly,diag=null) {
     }
     async function requireUploadQueue(apartment){if(!requestPrincipal||!idPattern.test(apartment??''))fail(403,'Authorized queued apartment required.');if(!await one("SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?",apartment))fail(403,'This apartment is no longer accepting uploads.');if(await one("SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)",apartment))fail(403,'Apartment is unavailable.');}
     if(path==='/api/staff/uploads'){if(!requestPrincipal)fail(404,'Not found.');const input=method==='PATCH'?await json(request):{};return output(await uploadsApi({db,principal:requestPrincipal,username:account.username,sessionHash:staffTokenHash,method,input,list:async()=>visibleApartments(requestPrincipal,await uploadInventory()),fail}));}
-    if(env.SCHEMA_REQUIRED&&['POST','PATCH','PUT','DELETE'].includes(method)){let schema;try{schema=await one('SELECT COUNT(*) n FROM app_migrations HAVING COUNT(*)=? AND MAX(version)=?',Number(env.SCHEMA_REQUIRED),Number(env.SCHEMA_REQUIRED));}catch{}if(!schema){const error=Error('Database upgrade is required before writing.');error.status=503;error.diagnosticCode='SCHEMA_UPGRADE_REQUIRED';throw error;}}
+    if(env.SCHEMA_REQUIRED&&['POST','PATCH','PUT','DELETE'].includes(method)){let schema;try{schema=await one('SELECT COUNT(*) n FROM app_migrations HAVING COUNT(*)=? AND MAX(version)=? AND MIN(version)=1',Number(env.SCHEMA_REQUIRED),Number(env.SCHEMA_REQUIRED));}catch{}if(!schema){const error=Error('Database upgrade is required before writing.');error.status=503;error.diagnosticCode='SCHEMA_UPGRADE_REQUIRED';throw error;}}
     if(path==='/api/staff/version'&&method==='GET')return output({...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',installedSchema:env.SCHEMA_REQUIRED?Number((await one('SELECT MAX(version) n FROM app_migrations'))?.n??0):null});
     if(path==='/api/staff/events'&&method==='POST'){if(env.DIAGNOSTICS_ENABLED!=='1')return output({accepted:false});await throttle('diagnostic-events',account.username);const b=await json(request,8192);let events;try{events=validateClientEvents(b);}catch{fail(400,'Invalid diagnostic milestones.');}if(b.apartment&&!authorize(requestPrincipal,'apartment.view',{id:b.apartment}).allowed)fail(403,'Apartment not authorized.');if(b.apartment&&!idPattern.test(b.apartment))fail(400,'Invalid apartment identifier.');const d=createDiagnostic(request,env);d.actor=account.username;d.apartment=idPattern.test(b.apartment??'')?b.apartment:null;d.category=b.category;d.events=events;d.stage=events.at(-1).stage;const status=events.some(e=>(e.status??200)>=400)?400:200;const result=d.finish(status);result.operation=b.operation;result.span=b.operation;result.code=status===400?'CLIENT_REPORTED_FAILURE':'CLIENT_MILESTONE';result.saved='unknown';result.cause='unknown';result.message='Browser-reported milestone; server outcome is not inferred.';result.suggestion='Review server spans with the same operation ID before retrying.';await storeDiagnostic(db,result,{source:'browser-reported'});return output({accepted:true});}
     if(path==='/api/staff/diagnostics'){if(account.role!=='administrator')fail(403,'Administrator required.');if(env.DIAGNOSTICS_ENABLED!=='1')fail(503,'Diagnostics are not enabled.');if(method==='GET'){try{return output({...await diagnosticQuery(db,url),configuration:{...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',passwordMode:passwordAccounts,privateImages:true,logDailyCap:2000}});}catch{fail(400,'Invalid diagnostic filter or unavailable schema.');}}if(method==='PUT'){const b=await json(request,1024);if(!['off','error','normal','detail'].includes(b.level)||!Number.isInteger(b.days)||b.days<1||b.days>30||!Number.isInteger(b.max_rows)||b.max_rows<100||b.max_rows>10000)fail(400,'Invalid diagnostic settings.');await run('UPDATE diagnostic_settings SET level=?,days=?,max_rows=? WHERE id=1',b.level,b.days,b.max_rows);return output({ok:true});}}
