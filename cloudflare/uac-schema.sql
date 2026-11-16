@@ -36,3 +36,6 @@ CREATE TRIGGER IF NOT EXISTS preserve_last_administrator_delete BEFORE DELETE ON
  BEGIN SELECT RAISE(ABORT,'Last active Administrator must be preserved'); END;
 
 CREATE TABLE IF NOT EXISTS activity_history(id INTEGER PRIMARY KEY AUTOINCREMENT,actor TEXT NOT NULL,action TEXT NOT NULL,resource TEXT,status INTEGER NOT NULL,created INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,applied INTEGER NOT NULL);
+INSERT OR IGNORE INTO app_migrations VALUES(2,CAST(strftime('%s','now') AS INTEGER)*1000);

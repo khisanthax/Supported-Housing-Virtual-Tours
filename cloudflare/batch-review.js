@@ -1,3 +1,4 @@
+import {beginOperation} from './operation-trace.js';
 import { extractPanoramas, MAX_CLOUD_JPEG } from './panorama-zip.js';
 
 const element = (tag, text) => {
@@ -16,6 +17,7 @@ export async function reviewBatch(files, existing, verify, save, { additiveOnly 
   if (files.length > 24 || files.reduce((sum, file) => sum + file.size, 0) > 48 * 1024 * 1024) {
     throw new Error('Choose at most 24 files totaling at most 48 MiB.');
   }
+  const trace=beginOperation('upload',new URL(location.href).searchParams.get('apartment'));trace.mark('upload-start',{count:files.length});
   const items = [];
   for (const file of files) {
     if (/\.zip$/i.test(file.name)) items.push(...await extractPanoramas(file));
@@ -43,14 +45,14 @@ export async function reviewBatch(files, existing, verify, save, { additiveOnly 
       if (item.error) throw new Error(item.error);
       if (!/\.jpe?g$/i.test(item.name)) throw new Error('Choose a JPEG file.');
       if (item.file.size > MAX_CLOUD_JPEG) throw new Error('Each cloud JPEG must be 4 MiB or smaller.');
-      await verify(item.file);
+      await verify(item.file);trace.mark('validation',{bytes:item.file.size,status:200});
       const image = element('img');
       image.alt = 'Preview of ' + item.name;
       image.src = URL.createObjectURL(item.file);
       urls.push(image.src);
       card.append(image);
       const hash = await digest(item.file);
-      const duplicate = known.get(hash);
+      const duplicate = known.get(hash);if(duplicate)trace.mark('duplicate',{count:1});
       known.set(hash, item.name);
       if (duplicate) card.append(element('p', 'Exact duplicate of ' + duplicate + '. Skipped by default.'));
       const assignment = element('select');
@@ -73,9 +75,11 @@ export async function reviewBatch(files, existing, verify, save, { additiveOnly 
       card.append(assignmentLabel, nameLabel);
       rows.push({ name, assignment, file: new Blob([item.file], { type: 'image/jpeg' }) });
     } catch (error) {
+      trace.mark('validation',{status:400});
       card.append(element('p', error.message + ' Skipped. Use a completed stitched panorama.'));
     }
   }
+  trace.send();
   const progress = element('p');
   progress.setAttribute('role', 'status');
   const saveButton = element('button', 'Upload and save draft');
@@ -101,7 +105,7 @@ export async function reviewBatch(files, existing, verify, save, { additiveOnly 
         }));
         try {
           if (!chosen.length || chosen.some(row => !row.name)) throw new Error('Select at least one image and name each selected viewpoint.');
-          await save(chosen, message => { progress.textContent = message; });
+          await save(chosen, message => { progress.textContent = message; }, trace);
           dialog.close();
         } catch (error) {
           progress.textContent = error.message;

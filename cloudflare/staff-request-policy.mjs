@@ -1,6 +1,8 @@
 import {authorize,effectivePermission,normalizeRole} from './access-policy.mjs';
 const hex='[a-f0-9]{32}';
 export function staffRequestPolicy(method,path,body={}){
+ if(path==='/api/staff/diagnostics')return {actions:['audit.view']};
+ if(['/api/staff/events','/api/staff/version'].includes(path))return {actions:[]};
  if(path==='/api/staff/sign-out'&&method==='POST')return {actions:[]};
  if(path==='/api/staff/me'&&method==='GET')return {actions:[]};
  if(path==='/api/staff/accounts')return {actions:['accounts.manage']};

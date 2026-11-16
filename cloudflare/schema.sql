@@ -49,3 +49,6 @@ CREATE TABLE IF NOT EXISTS staff_sessions(
   expires INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS staff_sessions_expiry ON staff_sessions(expires);
+
+CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,applied INTEGER NOT NULL);
+INSERT OR IGNORE INTO app_migrations VALUES(1,CAST(strftime('%s','now') AS INTEGER)*1000);

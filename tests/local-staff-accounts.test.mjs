@@ -25,6 +25,7 @@ async function fixture(t, { uac = false } = {}) {
   database.exec(await readFile(new URL('../cloudflare/schema.sql', import.meta.url), 'utf8'));
   if(uac)database.exec(await readFile(new URL('../cloudflare/uac-schema.sql',import.meta.url),'utf8'));
   if(uac)database.exec(await readFile(new URL('../cloudflare/uploads-schema.sql',import.meta.url),'utf8'));
+  if(uac)database.exec(await readFile(new URL('../cloudflare/diagnostics-schema.sql',import.meta.url),'utf8'));
   const d1 = {
     withSession(mode) {
       assert.equal(mode, 'first-primary');
@@ -102,6 +103,27 @@ function session(response) {
   assert.doesNotMatch(header, /(?:^|;\s*)Domain=/i);
   return header.split(';')[0];
 }
+
+test('diagnostic trace IDs survive Worker/DO boundaries, admin filters/export data exclude secrets and Staff cannot inspect',async t=>{
+ const {database,env,request,signIn}=await fixture(t,{uac:true});env.DIAGNOSTICS_ENABLED='1';env.SCHEMA_REQUIRED='4';env.APP_BUILD='abcdef12';
+ for(const [name,pw,role]of [['admin',adminPassword,'administrator'],['staff',editorPassword,'editor']])database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run(name,hashStaffPassword(pw),role);
+ const admin=session(await signIn('admin',adminPassword)),staff=session(await signIn('staff',editorPassword));
+ const trace='VT-'+'b'.repeat(32);
+ const r=await worker.fetch(new Request(origin+'/api/staff/apartments',{method:'POST',headers:{Cookie:admin,Origin:origin,'Content-Type':'application/json','X-Operation-ID':trace},body:JSON.stringify({tour:blankApartment(),photos:{}})}),env);assert.equal(r.status,201);assert.equal(r.headers.get('X-Operation-ID'),trace);
+ assert.equal((await request('/api/staff/diagnostics',{cookie:staff})).status,403);assert.equal((await request('/api/staff/diagnostics')).status,401);
+ const data=await(await request('/api/staff/diagnostics?operation='+trace,{cookie:admin})).json();assert.ok(data.operations.length);assert.ok(data.operations.some(d=>d.actor==='admin'&&d.saved==='confirmed'));assert.ok(!JSON.stringify(data).includes(adminPassword));assert.ok(!JSON.stringify(data).includes(admin.split('=')[1]));
+ assert.equal((await request('/api/staff/events',{cookie:staff,method:'POST',body:{operation:trace,category:'editor',message:editorPassword,events:[{stage:'doorway-place',status:200,password:editorPassword}]}})).status,200);
+ assert.ok(!JSON.stringify(database.prepare('SELECT * FROM diagnostic_operations').all()).includes(editorPassword));
+ assert.equal((await request('/api/staff/diagnostics',{cookie:admin,method:'PUT',body:{level:'normal',days:0,max_rows:2000}})).status,400);
+ t.mock.timers.setTime(Date.now()+3600001);const expired=await request('/api/staff/me',{cookie:staff});assert.equal(expired.status,401);assert.equal(expired.headers.get('X-Error-Code'),'SESSION_EXPIRED');
+});
+
+test('migration retry receipt makes a committed new import idempotent and remains scoped, private and non-replacing',async t=>{
+ const {database,request,signIn}=await fixture(t,{uac:true});database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('staff',hashStaffPassword(editorPassword),'editor');const cookie=session(await signIn('staff',editorPassword)),key='c'.repeat(32),tour=blankApartment('Synthetic migration');
+ const body={tour,photos:{},purpose:'import',importKey:key};const first=await(await request('/api/staff/apartments',{cookie,method:'POST',body})).json();assert.ok(first.id);const again=await(await request('/api/staff/apartments',{cookie,method:'POST',body})).json();assert.equal(again.id,first.id);assert.equal(again.replayed,true);assert.equal(database.prepare('SELECT COUNT(*) n FROM versions').get().n,1);assert.equal(database.prepare('SELECT COUNT(*) n FROM shares').get().n,0);assert.equal(database.prepare('SELECT available FROM versions').get().available,Number.MAX_SAFE_INTEGER);
+ assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',body:{...body,replacement:first.id,expectedVersion:1}})).status,400);
+ database.prepare('INSERT INTO uac_policy VALUES(?,?,1,?,?)').run('user:staff',JSON.stringify({scope:{mode:'selected',apartments:[]}}),'admin',Date.now());assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',body})).status,403);
+});
 
 test('Uploads queue requires individual supervisor designation, scoped membership, current revisions and non-destructive removal',async t=>{
  const {database,request,signIn}=await fixture(t,{uac:true});
@@ -451,6 +473,9 @@ test('UAC role assignment preserves credentials, revokes sessions and guards the
  assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'second',role:'staff',expectedRevision:1}})).status,200);assert.equal(database.prepare('SELECT password_verifier FROM staff_accounts WHERE username=?').get('second').password_verifier,verifier);assert.equal(database.prepare('SELECT role FROM staff_accounts WHERE username=?').get('second').role,'editor');
  assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'admin',role:'staff',expectedRevision:1}})).status,409);
  assert.ok(database.prepare('SELECT * FROM access_history WHERE target=?').get('role:second'));
+});
+test('incomplete upgrade ledgers block writes with a specific safe diagnostic',async t=>{
+ const {database,env,request,signIn}=await fixture(t,{uac:true});env.SCHEMA_REQUIRED='4';env.DIAGNOSTICS_ENABLED='1';database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');const cookie=session(await signIn('admin',adminPassword));database.exec('DELETE FROM app_migrations WHERE version=2');const blocked=await request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}});assert.equal(blocked.status,503);assert.equal(blocked.headers.get('X-Error-Code'),'SCHEMA_UPGRADE_REQUIRED');assert.equal(database.prepare('SELECT COUNT(*) n FROM versions').get().n,0);assert.equal((await request('/api/staff/dashboard',{cookie})).status,200);database.exec('INSERT INTO app_migrations VALUES(2,0)');assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}})).status,201);
 });
 test('UAC staff activity logging excludes passwords and cookies and preserves anonymous login-only entry',async t=>{
  const {database,request,signIn}=await fixture(t,{uac:true});database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');const cookie=session(await signIn('admin',adminPassword));

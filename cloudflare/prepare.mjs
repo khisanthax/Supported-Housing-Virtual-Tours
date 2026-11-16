@@ -43,7 +43,7 @@ for (const name of common) {
   await copy('dist/'+name,'staff/editor/'+name);
   await copy('dist/'+name,'offline/'+name);
 }
-for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js','encrypted-backup.js','backup-ui.js','vendor/backup-crypto.js','uploads-data.js']) await copy('dist/'+name,'staff/editor/'+name);
+for (const name of ['editor.css','tour-package.js','room-grid-ui.js','doorway-data.js','encrypted-backup.js','backup-ui.js','vendor/backup-crypto.js','uploads-data.js','operation-trace.js','backup-name.js']) await copy('dist/'+name,'staff/editor/'+name);
 await put('staff/editor/legacy.html',await readFile(new URL('staff/editor/index.html',output)));
 let guidedIndex=await readFile(new URL('staff/editor/index.html',output),'utf8');
 await put('staff/editor/index.html',guidedIndex.replace('<body>','<body data-guided="true">').replace('</head>','<link rel="stylesheet" href="guided-editor.css"></head>'));
@@ -90,7 +90,7 @@ form.addEventListener`)
     .replace('JSON.stringify({passphrase:form.elements.passphrase.value})',
       'JSON.stringify(individualAccounts ? {username:form.elements.username.value,password:form.elements.passphrase.value} : {passphrase:form.elements.passphrase.value})');
   if (name === 'staff.html') content = content
-    .replace('<nav class="actions">', '<nav class="actions"><a class="button secondary" href="https://github.com/khisanthax/Supported-Housing-Virtual-Tours/blob/main/PILOT.md" target="_blank" rel="noopener noreferrer">Staff guide</a>')
+    .replace('<nav class="actions">', '<nav class="actions"><a class="button secondary" href="/staff/help" target="_blank" rel="noopener noreferrer">Staff guide</a>')
     .replace('<ul id="catalog">','<p><a hidden id="staff-accounts" href="/staff/accounts">Manage staff accounts</a></p><ul id="catalog">')
     .replace('Open tour editor','Start an apartment')
     .replace('<ul id="catalog"></ul>','<ul id="catalog"></ul><button class="secondary" id="cleanup">Clean up unused storage</button>')
@@ -232,7 +232,9 @@ await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',outp
 
 await put('sharing/staff.html',(await readFile(new URL('sharing/staff.html',output),'utf8')).replace('<main>','<main>'+await readFile(new URL('cloudflare/sharing-workspace.html',root),'utf8')));
 
-for(const name of ['uac.html','uac.js','uac.css','access-ui.js','uploads.html','uploads.js','uploads.css'])await copy('cloudflare/'+name,'sharing/'+name);
+for(const name of ['uac.html','uac.js','uac.css','access-ui.js','uploads.html','uploads.js','uploads.css','diagnostics.html','diagnostics.js','migration.html','migration.js','help.html'])await copy('cloudflare/'+name,'sharing/'+name);
 for(const path of ['sharing/gallery.html','sharing/staff.html','staff/editor/index.html'])await put(path,(await readFile(new URL(path,output),'utf8')).replace('</head>','<script type="module" src="/sharing/access-ui.js"></script></head>'));
 
 await put('sharing/staff.js',"import {getAccess,applyAccess} from '/sharing/access-ui.js';\nconst access=await getAccess();\n"+await readFile(new URL('sharing/staff.js',output),'utf8'));
+
+for(const path of ['sharing/gallery.html','sharing/uac.html','sharing/staff-accounts.html'])await put(path,(await readFile(new URL(path,output),'utf8')).replace('<main>','<main><nav class="actions"><a href="/staff/migration">Migration Center</a> · <a href="/staff/help">Help</a>'+(path==='sharing/uac.html'?'<a href="/staff/diagnostics">Diagnostics</a>':'<a data-diagnostics href="/staff/diagnostics" hidden>Diagnostics</a>')+'</nav>'));

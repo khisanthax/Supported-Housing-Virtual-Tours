@@ -7,9 +7,9 @@ import { backupTestPassword, fillBackupDialog, readTestBackup } from './backup-p
 const origin=process.env.PILOT_PROBE_ORIGIN, {chromium}=await import(pathToFileURL(process.env.PILOT_PLAYWRIGHT).href);
 const browser=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true}), created=[];
-const errors=[];let writes=0,downloads=0;
+const errors=[];let writes=0,downloads=0,captureExport=false,exportRoots=[];
 page.on('pageerror',e=>errors.push(e.message));page.on('download',()=>downloads++);
-page.on('request',r=>{if(r.url().startsWith(origin)&&!r.url().includes('/sign-in'))assert.ok(![r.url(),r.postData()??''].some(s=>s.includes(backupTestPassword)),'Backup password must not leave browser');if(r.method()==='POST'&&/\/api\/staff\/(photos|apartments)$/.test(r.url()))writes++;});
+page.on('request',r=>{if(captureExport&&r.method()==='GET'&&/\/api\/staff\/tours\//.test(r.url()))exportRoots.push(r.headers()['x-operation-id']);if(r.url().startsWith(origin)&&!r.url().includes('/sign-in'))assert.ok(![r.url(),r.postData()??''].some(s=>s.includes(backupTestPassword)),'Backup password must not leave browser');if(r.method()==='POST'&&/\/api\/staff\/(photos|apartments)$/.test(r.url()))writes++;});
 async function api(path,method='GET',data,status=200){const r=await page.request.fetch(origin+'/api/staff/'+path,{method,headers:{Origin:origin},data});assert.equal(r.status(),status);return r.json();}
 async function gallery(){await page.goto(origin+'/staff');await page.getByRole('heading',{name:'Apartment Gallery',exact:true}).waitFor();await page.locator('#replace-apartment option').first().waitFor({state:'attached'});}
 async function exportClick(id){const row=page.locator('#catalog li').filter({has:page.locator('[href="/staff/editor/?apartment='+id+'"]')});await row.locator('details').evaluate(d=>d.open=true);await row.getByRole('button',{name:'Export .shtour',exact:true}).click();await page.locator('.backup-password-dialog').waitFor();}
@@ -20,9 +20,9 @@ try{
  for(const room of original.tour.rooms){const r=await page.request.get(origin+'/api/staff/tours/'+source.id+'/images/'+room.id);assert.equal(r.status(),200);images.set(room.id,new Blob([await r.body()],{type:'image/jpeg'}));}
  let archive;
  for(let n=0;n<2;n++){
-  const tour={...original.tour,title:'Synthetic encrypted acceptance '+Date.now()+' '+n};const a=await api('apartments','POST',{tour,photos:original.photos},201);created.push(a.id);await gallery();await exportClick(a.id);
+  const tour={...original.tour,title:'Synthetic encrypted acceptance '+Date.now()+' '+n};const a=await api('apartments','POST',{tour,photos:original.photos},201);created.push(a.id);await gallery();exportRoots=[];captureExport=true;await exportClick(a.id);
   if(n===0){await page.locator('[name=backupPassword]').fill(backupTestPassword);await page.locator('[name=backupConfirmation]').fill('Mismatch only');await page.getByRole('button',{name:'Encrypt and Download',exact:true}).click();await page.getByText('Backup passwords do not match.',{exact:true}).waitFor();assert.equal(downloads,0);}
-  const pending=page.waitForEvent('download');await fillBackupDialog(page,true);const download=await pending;assert.ok(download.suggestedFilename().endsWith('.shtour.zip'));const bytes=await readFile(await download.path()),round=await readTestBackup(new Blob([bytes]));assert.deepEqual(round.tour,tour);for(const[id,blob]of images)assert.deepEqual(await round.images.get(id).arrayBuffer(),await blob.arrayBuffer());archive=bytes;
+  const pending=page.waitForEvent('download');await fillBackupDialog(page,true);const download=await pending;captureExport=false;assert.equal(new Set(exportRoots).size,1);assert.match(exportRoots[0],/^VT-[a-f0-9]{32}$/);assert.ok(download.suggestedFilename().endsWith('.shtour.zip'));const bytes=await readFile(await download.path()),round=await readTestBackup(new Blob([bytes]));assert.deepEqual(round.tour,tour);for(const[id,blob]of images)assert.deepEqual(await round.images.get(id).arrayBuffer(),await blob.arrayBuffer());archive=bytes;
  }
  const beforeWrites=writes;
  await beginImport(archive);await fillBackupDialog(page,false,'Wrong synthetic password');await page.getByText('Incorrect backup password or damaged archive. Nothing has been imported.',{exact:true}).waitFor();assert.equal(writes,beforeWrites);await page.getByRole('button',{name:'Cancel',exact:true}).click();
