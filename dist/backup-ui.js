@@ -56,6 +56,6 @@ export async function exportBackup(loadDraft,suggestedName=loadDraft?.tour?.titl
   },suggestedName);
 }
 export async function readBackup(file,trace=beginOperation('backup')) {
-  if (!await isEncryptedBackup(file)) return unpackTour(file);
+  if (!await isEncryptedBackup(file)){trace.mark('backup-import');try{const result=await unpackTour(file);trace.mark('backup-import',{status:200,count:result.images.size});return result;}catch(error){trace.mark('backup-import',{status:400});trace.retry();throw error;}finally{trace.send();}}
   return passwordDialog(false, async(password, options)=>{trace.mark('backup-import');try{const result=await decryptBackup(file,password,options);trace.mark('backup-import',{status:200,count:result.images.size});return result;}catch(e){trace.mark('backup-import',{status:400});trace.retry();throw e;}finally{trace.send();}});
 }
