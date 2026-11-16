@@ -65,3 +65,7 @@ To reverse policy activation, set TOUR_UAC=0 and redeploy the same tested source
 ### Uploads Gallery additive migration
 
 After a fresh private D1 backup, apply cloudflare/uploads-schema.sql to the existing database before deploying the Uploads Gallery build. It is idempotent, adds only a queue row/table and audit triggers, and starts empty. Keep TOUR_UAC=1 and the existing Worker/D1/KV/bindings; no new service. Existing policy JSON is not rewritten. Do not enable uploads.manage through role defaults; designate individual Staff supervisors in UAC. Queue removal is not content deletion. For a rollback to code predating this permission, first remove only the new uploads.manage keys from role/user policies through the current Administrator policy API; retain other policy values, current drafts and additive queue data. Never restore an old full D1 snapshot over newer edits just to roll back code.
+
+## Current 0.2.0 installation and upgrade path
+
+Use [DISTRIBUTION.md](DISTRIBUTION.md) for the new guided independent installer and ordered additive schema-4 upgrade. Historical Firebase/shared-credential sections above document rollback history; new installations use independent username/password/scrypt accounts and opaque sessions. Do not provision Firebase. Follow DIAGNOSTICS.md for bounded detail logging and actual CPU interpretation.
