@@ -13,13 +13,15 @@ async function request(path, options) {
 export async function loadDraft() {
   apartment=new URLSearchParams(location.search).get('apartment');
   if (!apartment) return null;
-  const { tour, photos, revision } = await (await request('drafts/' + apartment)).json();
+  const trace=beginOperation('apartment',apartment);trace.mark('open');try{
+  const { tour, photos, revision } = await (await request('drafts/' + apartment,{headers:trace.headers()})).json();
   const images = new Map(await Promise.all(tour.rooms.filter(r=>Object.hasOwn(photos,r.id)).map(async room => [
     room.id,
-    await (await request(`tours/${apartment}/images/${room.id}?version=${revision}`)).blob()
+    await (await request(`tours/${apartment}/images/${room.id}?version=${revision}`,{headers:trace.headers()})).blob()
   ])));
   savedPhotos = new Map([...images].map(([room, blob]) => [room, { blob, id: photos[room] }]));
-  return { tour, images, revision };
+  trace.mark('open',{status:200,count:images.size});return { tour, images, revision };
+  }catch(error){trace.mark('open',{status:500});throw error;}finally{trace.send();}
 }
 
 async function performSaveDraft({ tour, images }, revision, progress = () => {}, options = {}) {

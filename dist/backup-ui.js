@@ -41,17 +41,18 @@ function passwordDialog(creating, operation, suggestedName='') {
   });
 }
 export async function exportBackup(loadDraft,suggestedName=loadDraft?.tour?.title??'Apartment') {
+  const trace=beginOperation('backup',new URL(location.href).searchParams.get('apartment'));
   return passwordDialog(true, async (password, options) => {
-    const trace=beginOperation('backup',new URL(location.href).searchParams.get('apartment'));trace.mark('backup-export');
+    trace.mark('backup-export');try{
     options.progress('Collecting complete apartment backup…');
-    const draft = typeof loadDraft === 'function' ? await loadDraft(options.signal) : loadDraft;
+    const draft = typeof loadDraft === 'function' ? await loadDraft(options.signal,trace) : loadDraft;
     const blob = await encryptBackup(draft, password, options);
     if (options.signal.aborted) return;
     const url = URL.createObjectURL(blob), link = document.createElement('a');
     link.href = url; link.download = backupFilename(options.fileLabel||draft.tour.title); document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    trace.mark('backup-export',{status:200,count:draft.images.size});trace.send();
-    return true;
+    trace.mark('backup-export',{status:200,count:draft.images.size});
+    return true;}catch(error){trace.mark('backup-export',{status:error.name==='AbortError'?499:500});trace.retry();throw error;}finally{trace.send();}
   },suggestedName);
 }
 export async function readBackup(file,trace=beginOperation('backup')) {

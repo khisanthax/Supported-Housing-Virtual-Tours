@@ -8,10 +8,10 @@ async function send(path,body,type,trace) {
   return result;
 }
 export async function exportApartment(apartment,title='Apartment') {
-  return exportBackup(async signal => {
+  return exportBackup(async (signal,trace) => {
   const endpoint='/api/staff/tours/'+apartment;
   const get=async path=>{
-    const response=await fetch(endpoint+'/'+path,{signal});
+    const response=await fetch(endpoint+'/'+path,{signal,headers:trace.headers()});
     if (!response.ok) throw new Error('Tour is unavailable. Retry shortly.');
     return response;
   };
