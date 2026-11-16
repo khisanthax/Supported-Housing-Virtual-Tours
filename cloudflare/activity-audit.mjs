@@ -13,7 +13,7 @@ export async function activityEnvelope(request){
  const uploadPhoto=found[1]==='photo.upload'&&new URL(request.url).searchParams.get('purpose')==='uploads';
  const uploadApartment=uploadBody?body.replacement:uploadPhoto?new URL(request.url).searchParams.get('apartment'):null;
  if(uploadBody||uploadPhoto)return {action:uploadBody?'uploads.save':'uploads.photo',resource:/^[a-f0-9]{32}$/.test(uploadApartment??'')?uploadApartment:null,sessionHash,username:null};
- return {scope:found[1]==='invitation.manage'&&Array.isArray(body.apartments)?body.apartments.filter(id=>/^[a-f0-9]{32}$/.test(id)).slice(0,25):undefined,expires:found[1]==='invitation.manage'&&Number.isSafeInteger(body.expires)?body.expires:undefined,action:found[1]+(action?'.'+action:''),resource:path.match(/[a-f0-9]{32}/)?.[0]??(found[1]==='staff.accounts'?username:null),sessionHash,username};
+ return {scope:found[1]==='invitation.manage'&&Array.isArray(body.apartments)?body.apartments.filter(id=>/^[a-f0-9]{32}$/.test(id)).slice(0,25):undefined,expires:found[1]==='invitation.manage'&&Number.isSafeInteger(body.expires)?body.expires:undefined,action:(found[1]==='apartment.save'&&body.purpose==='import'?'backup.import':found[1])+(action?'.'+action:''),resource:path.match(/[a-f0-9]{32}/)?.[0]??(found[1]==='staff.accounts'?username:null),sessionHash,username};
 }
 export async function recordActivity(db,envelope,status){
  if(!envelope)return;

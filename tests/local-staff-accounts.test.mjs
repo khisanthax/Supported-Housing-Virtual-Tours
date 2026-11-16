@@ -474,6 +474,9 @@ test('UAC role assignment preserves credentials, revokes sessions and guards the
  assert.equal((await request('/api/staff/uac',{cookie,method:'PATCH',body:{username:'admin',role:'staff',expectedRevision:1}})).status,409);
  assert.ok(database.prepare('SELECT * FROM access_history WHERE target=?').get('role:second'));
 });
+test('signed-out distribution pages redirect to secure login while their APIs stay private',async t=>{
+ const {env,request}=await fixture(t,{uac:true});env.DIAGNOSTICS_ENABLED='1';for(const path of ['/staff/migration','/staff/help','/staff/diagnostics']){const r=await request(path);assert.equal(r.status,303,path);assert.equal(r.headers.get('Location'),'/staff');}assert.equal((await request('/api/staff/diagnostics')).status,401);assert.equal((await request('/api/staff/version')).status,401);
+});
 test('incomplete upgrade ledgers block writes with a specific safe diagnostic',async t=>{
  const {database,env,request,signIn}=await fixture(t,{uac:true});env.SCHEMA_REQUIRED='4';env.DIAGNOSTICS_ENABLED='1';database.prepare('INSERT INTO staff_accounts(username,password_verifier,role) VALUES(?,?,?)').run('admin',hashStaffPassword(adminPassword),'administrator');const cookie=session(await signIn('admin',adminPassword));database.exec('DELETE FROM app_migrations WHERE version=2');const blocked=await request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}});assert.equal(blocked.status,503);assert.equal(blocked.headers.get('X-Error-Code'),'SCHEMA_UPGRADE_REQUIRED');assert.equal(database.prepare('SELECT COUNT(*) n FROM versions').get().n,0);assert.equal((await request('/api/staff/dashboard',{cookie})).status,200);database.exec('INSERT INTO app_migrations VALUES(2,0)');assert.equal((await request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}})).status,201);
 });
