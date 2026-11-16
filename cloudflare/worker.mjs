@@ -109,6 +109,7 @@ async function derivePassword(env,url,operation,data,diag=null) {
   return response.json();
 }
 
+function markDiagnosticResource(d,e){if(!d||!idPattern.test(e?.resource??''))return;if(e.action.startsWith('invitation.'))d.share=e.resource;else if(/^(apartment|uploads|backup)\./.test(e.action))d.apartment=e.resource;}
 async function handleRequest(request,env,privateStaffOnly=false) {
   const diagPath=new URL(request.url).pathname;
   const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
@@ -116,7 +117,7 @@ async function handleRequest(request,env,privateStaffOnly=false) {
   const finish=async(response,error)=>{if(!diagnostic)return response;const d=diagnostic.finish(response.status,error);if((privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&!(request.method==='GET'&&response.ok&&/\/images\//.test(diagPath)&&parseInt(d.span.slice(-2),16)>=26)&&!(diagPath==='/api/staff/diagnostics'&&response.status<400))try{await storeDiagnostic(env.DB.withSession('first-primary'),d);}catch{}const h=new Headers(response.headers);h.set('X-Operation-ID',diagnostic.operation);if(response.status>=400&&!h.has('X-Error-Code'))h.set('X-Error-Code',d.code);return new Response(response.body,{status:response.status,headers:h});};
   const auditEnabled=env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
   const envelope=auditEnabled?await activityEnvelope(request):null;
-  if(diagnostic&&envelope){diagnostic.action=envelope.action;diagnostic.requestedScope=envelope.scope;diagnostic.requestedExpires=envelope.expires;if(envelope.resource)diagnostic.apartment=envelope.resource;if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
+  if(diagnostic&&envelope){diagnostic.action=envelope.action;diagnostic.requestedScope=envelope.scope;diagnostic.requestedExpires=envelope.expires;markDiagnosticResource(diagnostic,envelope);if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
   if(envelope?.action==='staff.sign-in'&&envelope.username){try{const table=env.STAFF_AUTH_MODE==='password'?'staff_accounts':'firebase_staff_accounts';const known=await env.DB.withSession('first-primary').prepare('SELECT username FROM '+table+' WHERE username=?').bind(envelope.username).first();if(!known)envelope.username=null;}catch{envelope.username=null;}}
   if(envelope?.sessionHash){const actor=await env.DB.withSession('first-primary').prepare('SELECT a.username FROM staff_sessions s JOIN staff_accounts a USING(username) WHERE s.token=? AND s.revision=a.revision AND a.disabled=0 AND s.expires>?').bind(envelope.sessionHash,Date.now()).first();envelope.actor=actor?.username;}
   try {
@@ -126,13 +127,14 @@ async function handleRequest(request,env,privateStaffOnly=false) {
     const response=await route(request,env,privateStaffOnly,diagnostic);
     if(envelope?.action==='uploads.save'&&response.ok){const result=await response.clone().json();if(Number.isInteger(result.uploadedCount)&&result.uploadedCount>0&&result.uploadedCount<=12)envelope.action='uploads.saved.'+result.uploadedCount;}
     if(envelope&&diagnostic?.share)envelope.resource??=diagnostic.share;
-    if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);if(diagnostic)diagnostic.auditId=auditId;}catch{diagnostic?.mark('database',{status:500});}}
+    if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}markDiagnosticResource(diagnostic,envelope);try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);if(diagnostic)diagnostic.auditId=auditId;}catch{diagnostic?.mark('database',{status:500});}}
     if(diagnostic&&envelope?.actor)diagnostic.actor=envelope.actor;
     return finish(response);
   }
   catch (error) {
     if(diagnostic&&envelope)diagnostic.actor=envelope.actor??(envelope.action==='staff.sign-in'&&envelope.username?'sign-in:'+envelope.username:diagnostic.actor);
     if(envelope&&diagnostic?.share)envelope.resource??=diagnostic.share;
+    markDiagnosticResource(diagnostic,envelope);
     if(envelope)try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,error.status||500);if(diagnostic)diagnostic.auditId=auditId;}catch{}
     if (!error.status) console.error('Request failed',diagnostic?.operation??'untraced',error.diagnosticCode??'UNEXPECTED_FAILURE');
     return finish(output({error:error.status ? error.message : 'The request could not be completed.'},error.status || 500),error);
