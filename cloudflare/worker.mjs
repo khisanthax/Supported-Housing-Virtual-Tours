@@ -1,3 +1,5 @@
+import {release} from './release.mjs';
+import {createDiagnostic,storeDiagnostic,diagnosticQuery,validateClientEvents,newTrace,tracePattern} from './diagnostics.mjs';
 import { uploadsApi } from './uploads-api.mjs';
 import { assertAdditiveUpload } from '../dist/uploads-data.js';
 import {activityEnvelope,recordActivity} from './activity-audit.mjs';
@@ -95,34 +97,43 @@ async function passwordWork(request) {
   return output({valid:verifyStaffPassword(password,verifier)});
 }
 
-async function derivePassword(env,url,operation,data) {
+async function derivePassword(env,url,operation,data,diag=null) {
   const target=new URL('/'+operation,passwordWorkOrigin);
   const label=url.searchParams.get('acceptance');
   if (label && /^local-kdf-[a-z0-9:-]{1,80}$/.test(label)) target.searchParams.set('acceptance',label);
-  const response=await env.STAFF_LOGIN.getByName('password-hash-v1').fetch(new Request(target,{
+  const work=()=>env.STAFF_LOGIN.getByName('password-hash-v1').fetch(new Request(target,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)
   }));
+  const response=await(diag?diag.time('password-verification',work):work());
   if (!response.ok) fail(503,'Staff password service is temporarily unavailable.');
   return response.json();
 }
 
 async function handleRequest(request,env,privateStaffOnly=false) {
+  const diagPath=new URL(request.url).pathname;
+  const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
+  if(diagnostic){request=new Request(request);request.headers.set('X-Operation-ID',diagnostic.operation);}
+  const finish=async(response,error)=>{if(!diagnostic)return response;const d=diagnostic.finish(response.status,error);if((privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&!(request.method==='GET'&&response.ok&&/\/images\//.test(diagPath)&&parseInt(d.span.slice(-2),16)>=26)&&!(diagPath==='/api/staff/diagnostics'&&response.status<400))try{await storeDiagnostic(env.DB.withSession('first-primary'),d);}catch{}const h=new Headers(response.headers);h.set('X-Operation-ID',diagnostic.operation);if(response.status>=400&&!h.has('X-Error-Code'))h.set('X-Error-Code',d.code);return new Response(response.body,{status:response.status,headers:h});};
   const auditEnabled=env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
   const envelope=auditEnabled?await activityEnvelope(request):null;
+  if(diagnostic&&envelope){diagnostic.action=envelope.action;if(envelope.resource)diagnostic.apartment=envelope.resource;if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
+  if(envelope?.action==='staff.sign-in'&&envelope.username){try{const table=env.STAFF_AUTH_MODE==='password'?'staff_accounts':'firebase_staff_accounts';const known=await env.DB.withSession('first-primary').prepare('SELECT username FROM '+table+' WHERE username=?').bind(envelope.username).first();if(!known)envelope.username=null;}catch{envelope.username=null;}}
   if(envelope?.sessionHash){const actor=await env.DB.withSession('first-primary').prepare('SELECT a.username FROM staff_sessions s JOIN staff_accounts a USING(username) WHERE s.token=? AND s.revision=a.revision AND a.disabled=0 AND s.expires>?').bind(envelope.sessionHash,Date.now()).first();envelope.actor=actor?.username;}
   try {
     if (privateStaffOnly && env.STAFF_AUTH_MODE==='password' && new URL(request.url).origin===passwordWorkOrigin) {
       return await passwordWork(request);
     }
-    const response=await route(request,env,privateStaffOnly);
+    const response=await route(request,env,privateStaffOnly,diagnostic);
     if(envelope?.action==='uploads.save'&&response.ok){const result=await response.clone().json();if(Number.isInteger(result.uploadedCount)&&result.uploadedCount>0&&result.uploadedCount<=12)envelope.action='uploads.saved.'+result.uploadedCount;}
-    if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);}
-    return response;
+    if(envelope){if(!envelope.resource&&response.ok&&response.headers.get('Content-Type')?.includes('application/json')){const result=await response.clone().json();if(idPattern.test(result.id??''))envelope.resource=result.id;}try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,response.status);if(diagnostic)diagnostic.auditId=auditId;}catch{diagnostic?.mark('database',{status:500});}}
+    if(diagnostic&&envelope?.actor)diagnostic.actor=envelope.actor;
+    return finish(response);
   }
   catch (error) {
-    if(envelope)try{await recordActivity(env.DB.withSession('first-primary'),envelope,error.status||500);}catch{}
-    if (!error.status) console.error('Prototype request failed:',error.message);
-    return output({error:error.status ? error.message : 'The prototype could not complete this request.'},error.status || 500);
+    if(diagnostic&&envelope)diagnostic.actor=envelope.actor??(envelope.action==='staff.sign-in'&&envelope.username?'sign-in:'+envelope.username:diagnostic.actor);
+    if(envelope)try{const auditId=await recordActivity(env.DB.withSession('first-primary'),envelope,error.status||500);if(diagnostic)diagnostic.auditId=auditId;}catch{}
+    if (!error.status) console.error('Request failed',diagnostic?.operation??'untraced',error.diagnosticCode??'UNEXPECTED_FAILURE');
+    return finish(output({error:error.status ? error.message : 'The request could not be completed.'},error.status || 500),error);
   }
 }
 
@@ -138,12 +149,13 @@ export class StaffLogin {
   }
 }
 
-async function route(request,env,privateStaffOnly) {
+async function route(request,env,privateStaffOnly,diag=null) {
   const url=new URL(request.url);
   const local = env.LOCAL_SYNTHETIC_ONLY==='1' && ['localhost','127.0.0.1'].includes(url.hostname);
   const pilot = env.SYNTHETIC_EDGE_PILOT==='1' && url.protocol==='https:' &&
     url.origin===env.PILOT_ORIGIN && url.hostname.endsWith('.workers.dev');
-  if (!local && !pilot) fail(403,'Synthetic pilot only.');
+  const installed=env.INSTALLATION_MODE==='agency'&&env.INSTALLATION_ID&&url.protocol==='https:'&&url.origin===env.APP_ORIGIN;
+  if (!local && !pilot && !installed) fail(403,'Synthetic pilot only.');
   if (!keyPattern.test(env.GUEST_CODE_KEY ?? '')) fail(503,'Guest access is unavailable.');
   const path=url.pathname;
   const method=request.method;
@@ -177,9 +189,10 @@ async function route(request,env,privateStaffOnly) {
   }
   const db=env.DB.withSession('first-primary');
   const stmt=(sql,...args)=>db.prepare(sql).bind(...args);
-  const one=(sql,...args)=>stmt(sql,...args).first();
-  const all=async (sql,...args)=>(await stmt(sql,...args).all()).results;
-  const run=(sql,...args)=>stmt(sql,...args).run();
+  const measured=work=>diag?diag.time('database',work):work();
+  const one=(sql,...args)=>measured(()=>stmt(sql,...args).first());
+  const all=async (sql,...args)=>(await measured(()=>stmt(sql,...args).all())).results;
+  const run=(sql,...args)=>measured(()=>stmt(sql,...args).run());
   const now=Date.now();
   const staffAccountTable=passwordAccounts?'staff_accounts':'firebase_staff_accounts';
   const staffSessionTable=passwordAccounts?'staff_sessions':'firebase_staff_sessions';
@@ -206,7 +219,10 @@ async function route(request,env,privateStaffOnly) {
   const guest=()=>one(`SELECT s.id FROM sessions g JOIN shares s ON s.id=g.share
     WHERE g.token=? AND g.expires>? AND s.expires>? AND s.revoked IS NULL AND s.revision=g.revision`,cookie(request,'kv_guest'),now,now);
   const requireStaff=async()=>{
+    diag?.mark('authorization');
     const account=await staff();
+    if(account&&diag)diag.actor=account.username;
+    if(!account&&diag&&staffTokenHash){const prior=await one(`SELECT s.expires,a.disabled FROM ${staffSessionTable} s JOIN ${staffAccountTable} a USING(username) WHERE s.token=?`,staffTokenHash);if(prior&&(prior.expires<=now||prior.disabled))throw Object.assign(Error('Staff sign-in required.'),{status:401,diagnosticCode:prior.disabled?'ACCOUNT_DISABLED':'SESSION_EXPIRED'});}
     if (!account) fail(401,'Staff sign-in required.');
     return account;
   };
@@ -247,9 +263,10 @@ async function route(request,env,privateStaffOnly) {
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
   if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); if(env.TOUR_UAC==='1'){const p=await createPolicyStore(db).principal(await staff());if(!effectivePermission(p,'invitation.view').allowed&&!effectivePermission(p,'invitation.create').allowed)fail(403,'Invitation access denied.');} return asset('/sharing/staff.html'); }
+  if(method==='GET'&&['/staff/migration','/staff/help'].includes(path)){const a=await requireStaff();if(path==='/staff/migration'){const p=await createPolicyStore(db).principal(a);for(const key of ['backup.import','apartment.create','image.upload'])if(!effectivePermission(p,key).allowed)fail(403,'Import permission required.');}return asset(path==='/staff/migration'?'/sharing/migration.html':'/sharing/help.html');}
   if(method==='GET'&&path==='/staff/uploads'){if(!await staff())return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});if(env.TOUR_UAC!=='1')fail(404,'Not found.');return asset('/sharing/uploads.html');}
-  if(method==='GET'&&['/staff/uac','/sharing/uac.js','/sharing/uac.css'].includes(path)){
-    const a=await requireStaff();if(env.TOUR_UAC!=='1'||a.role!=='administrator')fail(403,'Administrator access required.');return asset(path==='/staff/uac'?'/sharing/uac.html':path);
+  if(method==='GET'&&['/staff/diagnostics','/staff/uac','/sharing/uac.js','/sharing/uac.css'].includes(path)){
+    const a=await requireStaff();if(env.TOUR_UAC!=='1'||a.role!=='administrator')fail(403,'Administrator access required.');return asset(path==='/staff/uac'?'/sharing/uac.html':path==='/staff/diagnostics'?'/sharing/diagnostics.html':path);
   }
   if (method==='GET' && path==='/api/staff/sign-in-mode') return output({individualAccounts});
   if (method==='GET' && (path==='/staff/accounts' || path==='/sharing/staff-accounts.js')) {
@@ -272,7 +289,7 @@ async function route(request,env,privateStaffOnly) {
     return asset(path==='/offline/'?'/offline/index.html':path);
   }
   if (method==='GET' && /^\/sharing\/(sharing\.css|guest\.js|staff-login\.js)$/.test(path)) return asset(path);
-  if (method==='GET' && ['/sharing/uploads.js','/sharing/uploads.css','/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css','/sharing/access-ui.js'].includes(path)) { await requireStaff(); return asset(path); }
+  if (method==='GET' && ['/sharing/diagnostics.js','/sharing/migration.js','/sharing/uploads.js','/sharing/uploads.css','/sharing/gallery.js','/sharing/qr.js','/sharing/sharing-gallery.css','/sharing/access-ui.js'].includes(path)) { await requireStaff(); return asset(path); }
   if (method==='GET' && (/^\/sharing\/(staff|worker-import)\.js$/.test(path) || path.startsWith('/staff/editor/'))) {
     await requireStaff();
     return asset(path==='/staff/editor/' ? path+(url.searchParams.has('legacy')?'legacy.html':'index.html') : path);
@@ -314,7 +331,7 @@ async function route(request,env,privateStaffOnly) {
       const account=results[limits.length].results[0];
       let expires;
       if (passwordAccounts) {
-        const {valid}=await derivePassword(env,url,'verify',{password:input.password,verifier:account?.password_verifier});
+        const {valid}=await derivePassword(env,url,'verify',{password:input.password,verifier:account?.password_verifier},diag);
         if (!valid || !account || account.disabled) fail(401,'Sign-in failed.');
         expires=Date.now()+hour;
       } else {
@@ -379,6 +396,10 @@ async function route(request,env,privateStaffOnly) {
     }
     async function requireUploadQueue(apartment){if(!requestPrincipal||!idPattern.test(apartment??''))fail(403,'Authorized queued apartment required.');if(!await one("SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?",apartment))fail(403,'This apartment is no longer accepting uploads.');if(await one("SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)",apartment))fail(403,'Apartment is unavailable.');}
     if(path==='/api/staff/uploads'){if(!requestPrincipal)fail(404,'Not found.');const input=method==='PATCH'?await json(request):{};return output(await uploadsApi({db,principal:requestPrincipal,username:account.username,sessionHash:staffTokenHash,method,input,list:async()=>visibleApartments(requestPrincipal,await uploadInventory()),fail}));}
+    if(env.SCHEMA_REQUIRED&&['POST','PATCH','PUT','DELETE'].includes(method)&&!await one('SELECT COUNT(*) n FROM app_migrations HAVING COUNT(*)=? AND MAX(version)=?',Number(env.SCHEMA_REQUIRED),Number(env.SCHEMA_REQUIRED)))fail(503,'Database upgrade is required before writing.');
+    if(path==='/api/staff/version'&&method==='GET')return output({...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',installedSchema:env.SCHEMA_REQUIRED?Number((await one('SELECT MAX(version) n FROM app_migrations'))?.n??0):null});
+    if(path==='/api/staff/events'&&method==='POST'){if(env.DIAGNOSTICS_ENABLED!=='1')return output({accepted:false});await throttle('diagnostic-events',account.username);const b=await json(request,8192);let events;try{events=validateClientEvents(b);}catch{fail(400,'Invalid diagnostic milestones.');}if(b.apartment&&!authorize(requestPrincipal,'apartment.view',{id:b.apartment}).allowed)fail(403,'Apartment not authorized.');if(b.apartment&&!idPattern.test(b.apartment))fail(400,'Invalid apartment identifier.');const d=createDiagnostic(request,env);d.actor=account.username;d.apartment=idPattern.test(b.apartment??'')?b.apartment:null;d.category=b.category;d.events=events;d.stage=events.at(-1).stage;const status=events.some(e=>(e.status??200)>=400)?400:200;const result=d.finish(status);result.operation=b.operation;result.span=b.operation;result.code=status===400?'CLIENT_REPORTED_FAILURE':'CLIENT_MILESTONE';result.saved='unknown';result.cause='unknown';result.message='Browser-reported milestone; server outcome is not inferred.';result.suggestion='Review server spans with the same operation ID before retrying.';await storeDiagnostic(db,result,{source:'browser-reported'});return output({accepted:true});}
+    if(path==='/api/staff/diagnostics'){if(account.role!=='administrator')fail(403,'Administrator required.');if(env.DIAGNOSTICS_ENABLED!=='1')fail(503,'Diagnostics are not enabled.');if(method==='GET'){try{return output({...await diagnosticQuery(db,url),configuration:{...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',passwordMode:passwordAccounts,privateImages:true,logDailyCap:2000}});}catch{fail(400,'Invalid diagnostic filter or unavailable schema.');}}if(method==='PUT'){const b=await json(request,1024);if(!['off','error','normal','detail'].includes(b.level)||!Number.isInteger(b.days)||b.days<1||b.days>30||!Number.isInteger(b.max_rows)||b.max_rows<100||b.max_rows>10000)fail(400,'Invalid diagnostic settings.');await run('UPDATE diagnostic_settings SET level=?,days=?,max_rows=? WHERE id=1',b.level,b.days,b.max_rows);return output({ok:true});}}
     if(path==='/api/staff/me'&&method==='GET'){
       if(!requestPrincipal)return output({role:account.role,permissions:null});
       return output({username:account.username,role:requestPrincipal.role,permissions:Object.fromEntries(Object.keys(PERMISSIONS).map(a=>[a,effectivePermission(requestPrincipal,a).allowed]))});
@@ -421,7 +442,7 @@ async function route(request,env,privateStaffOnly) {
         let result;
         if (passwordAccounts) {
           if (!validNewStaffPassword(password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
-          const {verifier}=await derivePassword(env,url,'hash',{password});
+          const {verifier}=await derivePassword(env,url,'hash',{password},diag);
           result=await run(`INSERT INTO staff_accounts(username,password_verifier,role)
             SELECT ?,?,? WHERE ${administratorGuard} ON CONFLICT DO NOTHING`,
             username,verifier,role,...administratorSession());
@@ -444,7 +465,7 @@ async function route(request,env,privateStaffOnly) {
         if (!target) fail(404,'Staff account not found.');
         if (reset && passwordAccounts) {
           if (!validNewStaffPassword(input.password)) fail(400,'Use at least 15 characters and at most 256 UTF-8 bytes.');
-          const {verifier}=await derivePassword(env,url,'hash',{password:input.password});
+          const {verifier}=await derivePassword(env,url,'hash',{password:input.password},diag);
           const result=await run(`UPDATE staff_accounts SET password_verifier=?,revision=revision+1
             WHERE username=? AND ${administratorGuard}`,verifier,username,...administratorSession());
           if (!result.meta.changes) fail(409,'Account or administrator session changed.');
@@ -491,7 +512,7 @@ async function route(request,env,privateStaffOnly) {
       const revision=String(version.seq);
       if (room) {
         if (url.searchParams.get('revision')!==revision) fail(409,'The apartment changed. Download the new version.');
-        if(!offlineTour.rooms.some(r=>r.id===room))fail(404,'Viewpoint is excluded.');return tourAsset(version,room,env);
+        if(!offlineTour.rooms.some(r=>r.id===room))fail(404,'Viewpoint is excluded.');return tourAsset(version,room,env,false,diag);
       }
       const images=JSON.parse(version.offline_images).filter(i=>offlineTour.rooms.some(r=>r.id===i.room));
       const offlineHours=env.TOUR_OFFLINE_HOURS===undefined ? 24 : Number(env.TOUR_OFFLINE_HOURS);
@@ -503,7 +524,8 @@ async function route(request,env,privateStaffOnly) {
       if (request.headers.get('Content-Type')!=='image/jpeg') fail(415,'Send one stitched JPEG.');
       const blob=await limitedBody(request,MAX_JPEG);
       try {
-        const {width,height}=await inspectJpeg(blob);
+        diag?.mark('validation',{bytes:blob.size});
+        const {width,height}=await inspectJpeg(blob);diag?.mark('validation',{bytes:blob.size,width,height});
         if (width>8192 || height>4096) fail(400,'JPEG dimensions exceed 8192 × 4096.');
         const end=new Uint8Array(await blob.slice(-2).arrayBuffer());
         if (end[0]!==255 || end[1]!==217) fail(400,'JPEG is truncated.');
@@ -516,13 +538,15 @@ async function route(request,env,privateStaffOnly) {
       ]).then(([reservation])=>{ if (!reservation.meta.changes) fail(429,'Daily pilot upload limit reached. Retry after midnight UTC.'); }); }
       catch(error) { if (error.message.includes('photo budget exceeded')) fail(507,'Private photo storage limit reached.'); throw error; }
       // Reservations count even if a write fails ambiguously, so parallel uploads cannot exceed the budget.
-      await env.PHOTOS.put(photo,await blob.arrayBuffer());
+      if(diag)await diag.time('storage',async()=>env.PHOTOS.put(photo,await blob.arrayBuffer()));else await env.PHOTOS.put(photo,await blob.arrayBuffer());
       await run('UPDATE photos SET ready=1 WHERE id=? AND ready=0',photo);
       if(requestPrincipal)await run('INSERT INTO photo_ownership(photo,username) VALUES(?,?)',photo,account.username);
       return output({id:photo,bytes:blob.size},201);
     }
     if (method==='POST' && path==='/api/staff/apartments') {
-      const {tour,photos,replacement,expectedVersion,purpose}=await json(request);
+      const {tour,photos,replacement,expectedVersion,purpose,importKey}=await json(request);
+      if(importKey!==undefined){if(purpose!=='import'||replacement||!idPattern.test(importKey))fail(400,'Invalid migration retry key.');const receipt=await one('SELECT apartment FROM migration_receipts WHERE username=? AND request_key=?',account.username,importKey);if(receipt){if(!authorize(requestPrincipal,'apartment.view',{id:receipt.apartment}).allowed)fail(403,'Previous import is outside current scope.');if(await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)',receipt.apartment))fail(409,'Previous import is archived or removed. Review the catalog before importing again.');const previous=await current(receipt.apartment);if(!previous)fail(409,'Previous import no longer exists.');return output({id:receipt.apartment,version:previous.seq,replayed:true},201);}}
+      if(diag&&purpose==='import')diag.category='migration';
       let uploadedCount;
       if(purpose==='uploads'){await requireUploadQueue(replacement);const previous=await current(replacement);if(!previous||previous.seq!==expectedVersion)fail(409,'Apartment changed. Reload before uploading again.');try{uploadedCount=assertAdditiveUpload(JSON.parse(previous.manifest),JSON.parse(previous.photos),tour,photos);}catch(error){fail(400,error.message);}}
       try { validateApartment(tour,{draft:true}); } catch (error) { fail(400,error.message); }
@@ -547,12 +571,13 @@ async function route(request,env,privateStaffOnly) {
       const seq=prior+1;
       const available=draftOnly;
       try {
-        const saved=await run(`INSERT INTO versions SELECT ?,?,?,?,?,?
+        const statement=stmt(`INSERT INTO versions SELECT ?,?,?,?,?,?
           WHERE NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3))
           ${purpose==='uploads'?'AND EXISTS(SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?)':''}
           AND COALESCE((SELECT MAX(seq) FROM versions WHERE apartment=?),0)=?
           AND (SELECT COUNT(*) FROM photos WHERE ready=1 AND id IN (${ids.map(()=>'?').join(',')||'NULL'}))=?`,
           apartment,seq,tour.title,JSON.stringify(tour),JSON.stringify(photos),available,apartment,...(purpose==='uploads'?[apartment]:[]),apartment,prior,...ids,ids.length);
+        const saved=importKey?(await db.batch([statement,stmt('INSERT INTO migration_receipts SELECT ?,?,?,? WHERE changes()=1',account.username,importKey,apartment,now)]))[0]:await statement.run();
         if (!saved.meta.changes) fail(409,'Apartment or uploads changed. Reload and try again.');
       } catch(error) { if (error.message.includes('UNIQUE')) fail(409,'This apartment changed. Refresh and try again.'); throw error; }
       if(requestPrincipal?.role==='staff'&&!replacement&&requestPrincipal.scope.mode==='selected')await run(`UPDATE uac_policy SET value=json_insert(value,'$.scope.apartments[#]',?),revision=revision+1,changed_by=?,changed_at=? WHERE key=? AND json_extract(value,'$.scope.mode')='selected'`,apartment,account.username,now,'user:'+account.username);
@@ -596,7 +621,7 @@ async function route(request,env,privateStaffOnly) {
       const version=await current(staffTour[1]);
       if(staffTour[2]==='thumbnail'&&(!version||!JSON.parse(version.photos)[JSON.parse(version.manifest).startRoom]))fail(404,'No starting-room image yet.');
       if (url.searchParams.has('version') && String(version?.seq)!==url.searchParams.get('version')) fail(409,'Tour changed. Export again.');
-      return tourAsset(version,staffTour[2]==='thumbnail'?JSON.parse(version.manifest).startRoom:staffTour[3],env);
+      return tourAsset(version,staffTour[2]==='thumbnail'?JSON.parse(version.manifest).startRoom:staffTour[3],env,false,diag);
     }
     const draftRoute=/^\/api\/staff\/drafts\/([a-f0-9]{32})$/.exec(path);
     if (method==='GET' && draftRoute) {
@@ -727,18 +752,18 @@ async function route(request,env,privateStaffOnly) {
         ORDER BY v.seq DESC LIMIT 1`,cookie(request,'kv_guest'),now,now,apartment,now);
     if (!version) { await requireGuest(); fail(404,'Tour not found or preparing.'); }
     if (group==='guest/tour' && !kind) return asset('/viewer/index.html');
-    if (group==='api/guest/tours' && kind) return tourAsset(version,kind==='thumbnail'?JSON.parse(version.manifest).startRoom:room,env,true);
+    if (group==='api/guest/tours' && kind) return tourAsset(version,kind==='thumbnail'?JSON.parse(version.manifest).startRoom:room,env,true,diag);
   }
   fail(404,'Not found.');
 }
 
-export async function tourAsset(version,room,env,guest=false) {
+export async function tourAsset(version,room,env,guest=false,diag=null) {
   if (!version) fail(404,'Tour not found.');
   if (!room) { const tour=JSON.parse(version.manifest); return output(guest?visitorManifest(tour):tour,200,{'X-Tour-Version':String(version.seq)}); }
   if(guest&&!publicationView(JSON.parse(version.manifest)).rooms.some(r=>r.id===room))fail(404,'Viewpoint is excluded.');
   const photos=JSON.parse(version.photos);
   if (!Object.hasOwn(photos,room)) fail(404,'Photo not found.');
-  const value=await env.PHOTOS.get(photos[room],{type:'stream',cacheTtl:30});
+  const work=()=>env.PHOTOS.get(photos[room],{type:'stream',cacheTtl:30});const value=await(diag?diag.time('storage',work):work());
   if (!value) return output({error:'Photo is still preparing. Retry shortly.'},503,{'Retry-After':'30'});
   return new Response(value,{headers:{...headers,'Content-Type':'image/jpeg'}});
 }
