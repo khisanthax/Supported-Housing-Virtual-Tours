@@ -111,12 +111,12 @@ async function derivePassword(env,url,operation,data,diag=null) {
 
 async function handleRequest(request,env,privateStaffOnly=false) {
   const diagPath=new URL(request.url).pathname;
-  const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
+  const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
   if(diagnostic){request=new Request(request);request.headers.set('X-Operation-ID',diagnostic.operation);}
   const finish=async(response,error)=>{if(!diagnostic)return response;const d=diagnostic.finish(response.status,error);if((privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&!(request.method==='GET'&&response.ok&&/\/images\//.test(diagPath)&&parseInt(d.span.slice(-2),16)>=26)&&!(diagPath==='/api/staff/diagnostics'&&response.status<400))try{await storeDiagnostic(env.DB.withSession('first-primary'),d);}catch{}const h=new Headers(response.headers);h.set('X-Operation-ID',diagnostic.operation);if(response.status>=400&&!h.has('X-Error-Code'))h.set('X-Error-Code',d.code);return new Response(response.body,{status:response.status,headers:h});};
   const auditEnabled=env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
   const envelope=auditEnabled?await activityEnvelope(request):null;
-  if(diagnostic&&envelope){diagnostic.action=envelope.action;if(envelope.resource)diagnostic.apartment=envelope.resource;if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
+  if(diagnostic&&envelope){diagnostic.action=envelope.action;diagnostic.requestedScope=envelope.scope;diagnostic.requestedExpires=envelope.expires;if(envelope.resource)diagnostic.apartment=envelope.resource;if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
   if(envelope?.action==='staff.sign-in'&&envelope.username){try{const table=env.STAFF_AUTH_MODE==='password'?'staff_accounts':'firebase_staff_accounts';const known=await env.DB.withSession('first-primary').prepare('SELECT username FROM '+table+' WHERE username=?').bind(envelope.username).first();if(!known)envelope.username=null;}catch{envelope.username=null;}}
   if(envelope?.sessionHash){const actor=await env.DB.withSession('first-primary').prepare('SELECT a.username FROM staff_sessions s JOIN staff_accounts a USING(username) WHERE s.token=? AND s.revision=a.revision AND a.disabled=0 AND s.expires>?').bind(envelope.sessionHash,Date.now()).first();envelope.actor=actor?.username;}
   try {

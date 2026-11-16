@@ -28,7 +28,7 @@ export async function storeDiagnostic(db,d,{source='server',levelOverride}={}){
  const level=levelOverride??settings?.level??'off';if(level==='off'||(level==='error'&&d.status<400))return;
  const severity=d.status>=500?'error':d.status>=400?'warning':'info';
  const events=d.events.slice(0,level==='detail'?24:16);
- events.push({stage:'response',status:d.status,cause:d.cause,message:d.message,suggestion:d.suggestion,browser:d.browser??'Other',action:d.action??null,databaseMs:Math.round((d.dbMs??0)*100)/100});
+ events.push({stage:'response',status:d.status,cause:d.cause,message:d.message,suggestion:d.suggestion,browser:d.browser??'Other',action:d.action??null,requestedScope:Array.isArray(d.requestedScope)?d.requestedScope.filter(id=>/^[a-f0-9]{32}$/.test(id)).slice(0,25):undefined,requestedExpires:Number.isSafeInteger(d.requestedExpires)?d.requestedExpires:undefined,rollback:d.status>=200&&d.status<300?'not-required':'unverified',databaseMs:Math.round((d.dbMs??0)*100)/100});
  await db.prepare(`INSERT INTO diagnostic_operations(operation,span,parent,actor,apartment,category,severity,code,stage,created,duration,version,build,deployment,source,saved,retry,events,audit_id)
  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(d.operation,d.span,d.parent,d.actor,d.apartment,d.category,severity,d.code,d.stage,Date.now(),d.duration,d.version,d.build,d.deployment,source,d.saved,d.retry?1:0,JSON.stringify(events),d.auditId||null).run();
 }
