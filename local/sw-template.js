@@ -60,7 +60,7 @@ self.addEventListener("fetch", (event) => {
       return (
         (await (await caches.open(CACHE)).match(path)) ??
         new Response(
-          "Application cache incomplete. Reconnect to the installation server.",
+          "Application cache incomplete. Reconnect to this website.",
           { status: 503 },
         )
       );

@@ -1,5 +1,6 @@
 // Synthetic data only. Run on its own loopback origin; never contacts the pilot.
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
+const engine=process.env.LOCAL_TEST_ENGINE==="webkit"?webkit:chromium;
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,17 +12,17 @@ const output =
   (await mkdtemp(join(tmpdir(), "local-tours-evidence-")));
 await mkdir(output, { recursive: true });
 const profile = await mkdtemp(join(tmpdir(), "local-tours-profile-")),
-  origin = "http://localhost:4186",
+  origin = process.env.LOCAL_TEST_ORIGIN ?? "http://localhost:4186",
   requests = [],
   errors = [],
   results = [];
-let service = spawn(process.execPath, ["local/serve.mjs"], {
+let service = process.env.LOCAL_TEST_ORIGIN ? null : spawn(process.execPath, ["local/serve.mjs"], {
     env: { ...process.env, LOCAL_TOURS_PORT: "4186" },
     stdio: ["ignore", "pipe", "pipe"],
   }),
   context,
   page;
-const launched = new Promise((resolve, reject) => {
+const launched = service ? new Promise((resolve, reject) => {
   service.stdout.on("data", (d) => {
     if (d.toString().includes("loopback only")) resolve();
   });
@@ -29,18 +30,18 @@ const launched = new Promise((resolve, reject) => {
   service.on("exit", (code) =>
     reject(Error("Local test server exited " + code)),
   );
-});
+}) : Promise.resolve();
 const launch = async () => {
-  context = await chromium.launchPersistentContext(profile, {
+  context = await engine.launchPersistentContext(profile, {
     headless: true,
-    channel: "chromium",
+    ...(engine===chromium?{channel: process.env.LOCAL_TEST_CHANNEL ?? "chromium"}:{}),
     viewport: { width: 1440, height: 1000 },
     acceptDownloads: true,
-    args: [
+    args: engine===chromium?[
       "--use-gl=angle",
       "--use-angle=swiftshader",
       "--enable-unsafe-swiftshader",
-    ],
+    ]:[],
   });
   context.on("request", (r) =>
     requests.push({ url: r.url(), method: r.method(), body: r.postData() }),
@@ -74,7 +75,7 @@ const saved = async (revision) => {
   await page.waitForFunction(
     () =>
       !document.getElementById("guide-next").disabled &&
-      document.getElementById("guide-status").textContent !== "Saving�",
+      document.getElementById("guide-status").textContent !== "Saving…",
   );
 };
 const newApartment = async (title) => {
@@ -331,9 +332,9 @@ try {
   pass(
     "Read-only viewer and every panorama at phone/tablet/unfolded viewports",
   );
-  const cdp = await context.browser().newBrowserCDPSession();
   installed = false;
-  try {
+  if(!process.env.LOCAL_TEST_NO_INSTALL)try {
+    const cdp = await context.browser().newBrowserCDPSession();
     await cdp.send("PWA.install", {
       manifestId: origin + "/",
       installUrlOrBundleUrl: origin + "/",
@@ -352,7 +353,7 @@ try {
     results.push("UNVERIFIED OS PWA install: " + error.message.split("\n")[0]);
   }
   await context.close();
-  await new Promise((r) => {
+  if(service)await new Promise((r) => {
     service.once("exit", r);
     service.kill();
   });
@@ -398,7 +399,7 @@ try {
   }
   await snapshot("offline-restart");
   pass(
-    "Browser process restart with static server stopped: Gallery, all spheres, editing, save and reload offline",
+    process.env.LOCAL_TEST_ORIGIN?"Browser restart without installation: Gallery, all spheres, editing, save and reload offline":"Browser process restart with static server stopped: Gallery, all spheres, editing, save and reload offline",
   );
   await step(1);
   await page.locator("#guide-backup").click();

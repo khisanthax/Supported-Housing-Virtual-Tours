@@ -93,7 +93,7 @@ html = html
   )
   .replace(
     "<body>",
-    '<body data-guided="true" data-edition="local"><aside class="local-banner"><a href="/">Apartment Gallery</a> · LOCAL ONLY · <span id="local-offline-status" role="status">Preparing offline application…</span> · <span id="local-network-status"></span><button id="local-install" hidden>Install app</button></aside>',
+    '<body data-guided="true" data-edition="local"><aside class="local-banner"><a href="/">Apartment Gallery</a> · LOCAL ONLY · <span id="local-offline-status" role="status">Preparing offline application…</span> · <span id="local-network-status"></span><button id="local-install" hidden>Install app (optional)</button></aside>',
   )
   .replace(
     /(href|src)="(styles.css|editor.css|app.js|vendor\/marzipano.js)"/g,
@@ -128,6 +128,21 @@ await put(
     })),
   }),
 );
+await put('_headers',`/*
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Frame-Options: DENY
+  Cross-Origin-Resource-Policy: same-origin
+${['/','/index.html','/editor/','/editor/index.html','/help.html','/diagnostics.html'].map(path=>path+'\n  Content-Security-Policy: '+csp+"; frame-ancestors 'none'").join('\n')}
+/sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /
+  Content-Security-Policy: default-src 'none'; connect-src 'self'; script-src 'self'
+`);
+await put('_redirects','/ /index.html 200\n/editor/ /editor/index.html 200\n/editor /editor/index.html 200\n');
+files.delete('/_redirects');
+files.delete('/_headers'); // Hosting control file: never cached or navigated as an app asset.
 // Only code/static shell files enter this allowlist. No samples, projects or photographs.
 const assets = Object.fromEntries(
   [...files]

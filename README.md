@@ -14,4 +14,4 @@ See [independent Cloudflare setup and upgrades](DISTRIBUTION.md), [architecture 
 
 ## Local Only edition
 
-For a separate device-only Gallery and the same modern editor, run `npm run start:local` and open http://localhost:4185. No Cloudflare login, data upload or synchronization is used. See [installation, storage and encrypted backups](LOCAL-ONLY.md) and [verified local acceptance](LOCAL-ACCEPTANCE.md). This edition does not replace the existing Cloudflare app.
+For a separate device-only Gallery and the same modern editor, staff can visit the dedicated [browser-first Local Only website](LOCAL-BROWSER.md) with no installer or technical setup. The optional standalone developer setup remains `npm run start:local` at http://localhost:4185. No Cloudflare login, data upload or synchronization is used. See [installation, storage and encrypted backups](LOCAL-ONLY.md) and [verified local acceptance](LOCAL-ACCEPTANCE.md). This edition does not replace the existing Cloudflare app.

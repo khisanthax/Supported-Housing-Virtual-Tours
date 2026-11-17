@@ -2,7 +2,17 @@
 
 Local Only uses the **same current four-step guided editor and Marzipano viewer** as the online edition. It is a separate, single-device app: no login, accounts, guest links, collaboration, server database, automatic migration or synchronization. Nothing publishes to Cloudflare. Desktop editing is recommended; phone and tablet viewing is supported. No paid service is required. No public release or distribution license is selected by this implementation.
 
-## Windows installation
+## Browser-first website (recommended)
+
+Staff can open the dedicated HTTPS website directly and use the full Gallery/editor **without installing anything**, signing in, running Node.js or opening a command prompt. Use the website URL in the deployment handoff/PR. Bookmark that exact address and keep using the same browser profile. Gallery displays **Saved on this device**; editor actions save automatically. This website serves application assets only; all apartment data remains in IndexedDB on that device.
+
+Wait for **Application ready offline** before disconnecting. When the browser retains the shell and projects, reopen the bookmarked website offline. Installation remains an optional convenience, never a prerequisite. If service workers/caching are blocked, online editing still stores data locally but offline reopening cannot work. Data does not automatically appear on other computers, browsers or profiles. Clearing site data can delete it. Export encrypted backups regularly, especially on Safari/iPad.
+
+The new website has its own origin and service-worker scope, separate from the online edition and earlier localhost installations. Existing localhost projects do **not** move automatically: export an encrypted backup there and import it explicitly into the website. The old local project is untouched. Never clear the old browser data before verifying the restored copy.
+
+See [browser-first deployment and acceptance](LOCAL-BROWSER.md) for actual tests, network evidence and Safari limitations. Staff do not need the developer setup below.
+
+## Optional Windows standalone installation
 
 Use a normal Chrome or Edge profile and Node.js 24. From a checkout:
 
@@ -25,7 +35,7 @@ Extract `Virtual-Tours-Local-Only-private.zip`, open its `Virtual-Tours-Local` f
 
 PWA installation requires a secure context: trusted HTTPS or **localhost on the device itself**. A desktop's localhost address does not work on a phone. Serving `http://192.168...` does not provide a supported installable PWA; do not disable browser security or install untrusted certificates.
 
-An agency can provide the generated static installation files over an approved trusted HTTPS origin dedicated to Local Only. Only initial/updated application assets are served; apartment content never leaves the browser. This task does **not** create that host or change the existing Cloudflare pilot. Use a separate origin from the online edition. Hosting an asset-only installer is optional and is not tour-data hosting. On Android, Chrome → menu → **Install app / Add to Home screen**. On iPad, Safari → Share → **Add to Home Screen**, then open that installed app, wait for caching, and import/create projects there. Safari's installed app and browser tab may have different storage; use encrypted exports for explicit transfer.
+An agency can provide the generated static installation files over an approved trusted HTTPS origin dedicated to Local Only. Only initial/updated application assets are served; apartment content never leaves the browser. The browser-first follow-up provides a dedicated assets-only HTTPS website without changing the existing Cloudflare online edition. Use a separate origin from the online edition. Hosting an asset-only installer is optional and is not tour-data hosting. On Android, Chrome → menu → **Install app / Add to Home screen**. On iPad, Safari → Share → **Add to Home Screen**, then open that installed app, wait for caching, and import/create projects there. Safari's installed app and browser tab may have different storage; use encrypted exports for explicit transfer.
 
 Alternatively, an Android on-device static server capable of serving this package at localhost can supply the initial shell. The desktop package's `serve.mjs` requires Node.js 24. Mobile server/OS setup and physical Android/iPad installation have **not** been verified. No mobile helper or third-party hosting subscription is required by the application. For viewing on another device, explicitly transfer an encrypted backup and restore it on that device; there is no shared catalog.
 

@@ -1,6 +1,9 @@
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {staticSiteConfig,stageStaticSite} from '../local/hosting.mjs';
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, mkdtemp } from "node:fs/promises";
 import {runInNewContext} from 'node:vm';
 test("Local package uses the current shared editor with explicit adapters and no cloud modules or photographs", async () => {
   for(const name of await readdir(new URL('../local/',import.meta.url)))if(/\.(js|mjs|html|css)$/.test(name))new TextDecoder('utf-8',{fatal:true}).decode(await readFile(new URL('../local/'+name,import.meta.url)));
@@ -54,4 +57,11 @@ test('PWA first-install timeout reports not-ready without touching projects',asy
  const run=new AsyncFunction('document','navigator','isSecureContext','addEventListener','setTimeout','clearTimeout','MessageChannel',code);
  await run({getElementById:id=>id==='local-offline-status'?status:null},{onLine:false,serviceWorker:{register:async()=>{},ready:new Promise(()=>{})}},true,()=>{},callback=>{queueMicrotask(callback);return 1;},()=>{},class{});
  assert.equal(status.dataset.ready,'false');assert.match(status.textContent,/caching did not finish/);
+});
+
+test('Browser-first deployment has no script, storage, routes, logging or paid service configuration',()=>{
+ const c=staticSiteConfig({name:'isolated-local-assets',account:'a'.repeat(32),directory:tmpdir()});assert.deepEqual(Object.keys(c).sort(),['account_id','assets','compatibility_date','name','observability','preview_urls','workers_dev']);assert.equal(c.observability.enabled,false);assert.equal(c.assets.not_found_handling,'none');assert.equal(c.assets.html_handling,'none');assert.throws(()=>staticSiteConfig({name:'supported-housing-synthetic-pilot',account:'a'.repeat(32),directory:tmpdir()}));
+});
+test('Static hosting stage contains only built shell/control files and never sweeps unrelated files',async()=>{
+ await import('../local/build.mjs');const stage=await mkdtemp(join(tmpdir(),'local-static-stage-'));await stageStaticSite(stage);assert.ok((await readdir(stage)).includes('_headers'));assert.equal(await readFile(join(stage,'_redirects'),'utf8'),'/ /index.html 200\n/editor/ /editor/index.html 200\n/editor /editor/index.html 200\n');await assert.rejects(stageStaticSite(stage),/fresh, empty/);const manifest=JSON.parse(await readFile(join(stage,'assets.json')));assert.ok(!manifest.files.some(f=>/\.(jpe?g|shtour|zip|db)$/i.test(f)));const headers=await readFile(join(stage,'_headers'),'utf8');assert.match(headers,/connect-src 'none'/);assert.match(headers,/\/sw.js[\s\S]*connect-src 'self'/);assert.match(await readFile(join(stage,'index.html'),'utf8'),/No installation or login required/);
 });
