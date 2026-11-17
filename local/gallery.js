@@ -196,6 +196,7 @@ async function renderGallery() {
   }
   if (!apartments.length)
     say("No local apartments yet. Choose NEW APARTMENT or Import Backup.");
+  if(apartments.length&&$("message").textContent==="Opening local apartments…")say("Choose Edit to continue, or open a saved tour to present. Projects stay on this device.");
   await info();
 }
 $("new-apartment").onclick = () =>
