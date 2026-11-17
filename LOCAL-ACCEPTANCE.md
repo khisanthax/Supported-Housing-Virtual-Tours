@@ -6,7 +6,7 @@ Scope: separate device-only edition; synthetic fixtures only. Existing Cloudflar
 
 | Gate | Result and evidence |
 | --- | --- |
-| Full regression | **95/95 passed**, Node 24; baseline 87. Existing authentication/UAC/guests/offline/ZIP/encryption tests remain. Added local multi-apartment/CAS/history/quota/transaction-rollback/package-boundary/service-worker tests. |
+| Full regression | **97/97 passed**, Node 24; baseline 87. Existing authentication/UAC/guests/offline/ZIP/encryption tests remain. Added local multi-apartment/CAS/history/quota/transaction-rollback/package-boundary/service-worker/failure-timeout tests. |
 | Current editor reuse | Canonical current guided-editor source copied byte-for-byte into each edition; cloud/local runtimes implement the explicit load/save/complete adapter. Cloud prepare succeeds. No legacy-editor fork. |
 | Browser editor | **PASS** JPEG + ZIP review/import, real thumbnails, blank layout, optional multiple viewpoints per room, actual mouse doorway drag, reciprocal placement, accurate saved coordinates, arrow movement/Undo, generated graph/reset/Undo and Ready state. |
 | Device storage | **PASS** independent apartment IDs/revisions; original bytes; stale-save rejection in two actual windows; process restart; quota rejection and forced interrupted final transaction leave previous data intact. Deletion cancel and confirmed scoped deletion pass. |

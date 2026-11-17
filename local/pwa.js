@@ -22,19 +22,20 @@ const connection = () => {
 addEventListener("online", connection);
 addEventListener("offline", connection);
 connection();
+const within=(promise,message)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(message)),20000);promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});
 try {
   if (!isSecureContext || !navigator.serviceWorker)
     throw Error(
       "Use localhost or a trusted HTTPS installation address. Opening files directly cannot install the PWA.",
     );
   await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  await navigator.serviceWorker.ready;
+  await within(navigator.serviceWorker.ready,"Application caching did not finish. Keep the installation server available and reload before disconnecting. Your projects are unchanged.");
   if (!navigator.serviceWorker.controller)
-    await new Promise((resolve) =>
+    await within(new Promise((resolve) =>
       navigator.serviceWorker.addEventListener("controllerchange", resolve, {
         once: true,
       }),
-    );
+    ),"Offline controller did not start. Reopen the application with the installation server available; your projects are unchanged.");
   const verified = await new Promise((resolve) => {
     const channel = new MessageChannel(),
       timer = setTimeout(() => resolve(false), 15000);

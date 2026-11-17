@@ -51,6 +51,7 @@ const launch = async () => {
   page.setDefaultTimeout(20000);
   page.on("dialog", (d) => d.accept());
 };
+let installed=false;
 const pass = (text) => {
   results.push(text);
   console.log("PASS " + text);
@@ -306,7 +307,7 @@ try {
   await page.goto(origin + "/editor/#apartment=" + first + "&view=1");
   await ready();
   await page.locator("#loading").waitFor({ state: "hidden" });
-  await page.getByText("Local tour · Read only. Use Edit in the Gallery to make changes.",{exact:true}).waitFor();
+  await page.getByText("Local tour Â· Read only. Use Edit in the Gallery to make changes.",{exact:true}).waitFor();
   assert.equal(await page.locator("#guide-steps").isVisible(), false);
   assert.equal(await page.locator(".destination-handle").count(), 0);
   for (const viewport of [
@@ -331,7 +332,7 @@ try {
     "Read-only viewer and every panorama at phone/tablet/unfolded viewports",
   );
   const cdp = await context.browser().newBrowserCDPSession();
-  let installed = false;
+  installed = false;
   try {
     await cdp.send("PWA.install", {
       manifestId: origin + "/",
@@ -574,6 +575,7 @@ try {
   await snapshot("failure").catch(() => {});
   throw error;
 } finally {
+  if(installed&&context)try{const cleanup=await context.browser().newBrowserCDPSession();await cleanup.send("PWA.uninstall",{manifestId:origin+"/"});}catch{/* Only this synthetic test profile is eligible for cleanup. */}
   await context?.close();
   service?.kill();
   await writeFile(
