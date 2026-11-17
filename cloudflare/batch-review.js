@@ -13,7 +13,7 @@ const digest = async file => {
   return [...new Uint8Array(hash)].join(',');
 };
 
-export async function reviewBatch(files, existing, verify, save, { additiveOnly = false } = {}) {
+export async function reviewBatch(files, existing, verify, save, { additiveOnly = false, localOnly = false } = {}) {
   if (files.length > 24 || files.reduce((sum, file) => sum + file.size, 0) > 48 * 1024 * 1024) {
     throw new Error('Choose at most 24 files totaling at most 48 MiB.');
   }
@@ -82,7 +82,7 @@ export async function reviewBatch(files, existing, verify, save, { additiveOnly 
   trace.send();
   const progress = element('p');
   progress.setAttribute('role', 'status');
-  const saveButton = element('button', 'Upload and save draft');
+  const saveButton = element('button', localOnly?'Import and save locally':'Upload and save draft');
   const cancel = element('button', 'Cancel');
   saveButton.className = 'edit-button';
   cancel.className = 'edit-button secondary';

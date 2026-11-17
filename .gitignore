@@ -23,3 +23,5 @@ cloudflare/cloudflare/
 .codex-attachments/
 
 **/.wrangler/
+
+local/generated/

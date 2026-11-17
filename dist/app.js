@@ -2,6 +2,7 @@ import { validateApartment, validateDimensions } from './tour-data.js';
 const $ = (id) => document.getElementById(id);
 const guest = document.body.dataset.guest === 'true';
 const offline = document.body.dataset.offline === 'true';
+const localOnly=document.body.dataset.edition==='local';
 const guestTour = guest ? '/api/guest/tours/' + location.pathname.split('/').at(-1) : null;
 const state = { data: null, viewer: null, scene: null, room: null, request: 0, overrides: new Map(), busy: false };
 let editor;
@@ -82,6 +83,7 @@ async function openRoom(id, { focus = false, force = false, position } = {}) {
   $('error').hidden = true; $('loading').hidden = false;
   let nextScene;
   try {
+    if(localOnly&&!imageUrls.has(id))throw Error('This local stitch is missing. Restore it from an encrypted backup.');
     const image = await prepareImage(guest ? `${guestTour}/images/${id}` : state.overrides.get(id) || imageUrls.get(id)?.url || room.image);
     if (request !== state.request) return;
     const M = window.Marzipano;
@@ -97,7 +99,7 @@ async function openRoom(id, { focus = false, force = false, position } = {}) {
     if (oldScene) state.viewer.destroyScene(oldScene);
     view.addEventListener('change', updateCoordinates);
     updateUI(room);
-    history.replaceState(null, '', `#${room.id}`);
+    if(localOnly){const p=new URLSearchParams(location.hash.slice(1));p.set('room',room.id);history.replaceState(null,'','#'+p);}else history.replaceState(null, '', `#${room.id}`);
     if (focus) $('pano').focus({ preventScroll: true });
     $('loading').hidden = true;
   } catch (error) {
@@ -163,7 +165,7 @@ $('restore-demo')?.addEventListener('click', async () => {
   const id = state.room.id; const url = state.overrides.get(id); state.overrides.delete(id);
   await openRoom(id, { force: true }); if (url) URL.revokeObjectURL(url);
 });
-window.addEventListener('hashchange', () => { if (state.data) openRoom(location.hash.slice(1)); });
+window.addEventListener('hashchange', () => { if (state.data) openRoom(localOnly?new URLSearchParams(location.hash.slice(1)).get('room'):location.hash.slice(1)); });
 function currentView() {
   const view = state.scene?.view();
   return view && { yaw: view.yaw(), pitch: view.pitch(), fov: view.fov() };
@@ -183,7 +185,7 @@ async function showTour(data, images, preferredRoom, keepView = false) {
   $('apartment-title').textContent = data.title;
   document.title = `${data.title} · 360° walkthrough`;
   document.querySelector('.tour-meta div span').textContent = `${data.rooms.length} rooms · Explore freely`;
-  document.querySelector('.demo-tag').textContent = offline ? 'Saved tour · Read only' : guest ? 'Shared tour' : images ? 'Private draft' : '● Sample apartment';
+  document.querySelector('.demo-tag').textContent = localOnly ? 'Local Only · On this device' : offline ? 'Saved tour · Read only' : guest ? 'Shared tour' : images ? 'Private draft' : '● Sample apartment';
   document.querySelector('.synthetic-badge').hidden = guest || !!images;
   if (!guest && !offline) document.querySelector('.local-preview').hidden = !!images;
   document.querySelector('.details aside').hidden = guest || !!images;
