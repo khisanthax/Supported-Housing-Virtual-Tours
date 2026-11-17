@@ -306,7 +306,7 @@ try {
   await page.goto(origin + "/editor/#apartment=" + first + "&view=1");
   await ready();
   await page.locator("#loading").waitFor({ state: "hidden" });
-  await page.locator("#guide-title").waitFor();
+  await page.getByText("Local tour · Read only. Use Edit in the Gallery to make changes.",{exact:true}).waitFor();
   assert.equal(await page.locator("#guide-steps").isVisible(), false);
   assert.equal(await page.locator(".destination-handle").count(), 0);
   for (const viewport of [

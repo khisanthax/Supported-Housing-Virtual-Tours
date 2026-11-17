@@ -4,6 +4,7 @@ import { recordFailure } from "../local/diagnostics.js";
 const params = new URLSearchParams(location.hash.slice(1));
 let apartment = params.get("apartment");
 const readOnly = params.has("view");
+if(readOnly)document.body.classList.add("local-view-only");
 const access = { local: true };
 const can = (_, key) =>
   [

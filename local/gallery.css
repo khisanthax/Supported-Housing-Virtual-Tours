@@ -2,3 +2,5 @@
 .guided button{background:#fff;color:#2b4562}.guided .guide-steps button{background:transparent;color:#435b70}.guided #guide-publish,.guided #guide-add-stitch{background:#254e3e;color:white}.guided button:disabled{opacity:.55}.local-view-only #guide-title{opacity:1}
 
 .guided .hotspot{background:transparent;color:white;border:0;padding:0}.guided .hotspot-label{color:white}
+
+.local-view-only #tour-review{display:none!important}
