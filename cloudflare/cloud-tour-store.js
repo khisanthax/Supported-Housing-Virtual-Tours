@@ -55,3 +55,5 @@ async function performSaveDraft({ tour, images }, revision, progress = () => {},
 }
 
 export async function saveDraft(draft,revision,progress=()=>{},options={}){const trace=options.trace??(pendingTrace??=beginOperation(options.purpose==='uploads'?'upload':'editor',apartment));trace.mark('save',{count:draft.images.size});try{const result=await performSaveDraft(draft,revision,progress,{...options,trace});trace.mark('save',{status:201,count:draft.images.size});pendingTrace=null;return result;}catch(e){trace.mark('save',{status:400});trace.retry();throw e;}finally{trace.send();}}
+
+export async function completeDraft(revision){await request('apartments/'+apartment,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'publish',expectedVersion:revision})});return {revision};}

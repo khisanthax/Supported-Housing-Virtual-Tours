@@ -31,3 +31,7 @@ The deployed Worker uses Service Worker, Cache Storage, Web Crypto, and IndexedD
 The hosted browser probe verifies encrypted download, a complete browser-process restart with browser networking disabled, every sphere and doorway, reconnect update detection, replacement download, archive withdrawal, restore as unpublished, and download removal. It uses an isolated disposable mobile-viewport profile and a cloned synthetic draft. This does not establish airplane-mode behavior or installed-app launch on a physical Fold. Those checks remain open.
 
 Run `node cloudflare/offline-browser-probe.mjs` with `PILOT_PLAYWRIGHT` pointing to an installed Playwright module. For the approved synthetic hosted pilot, supply `PILOT_PROBE_ORIGIN`, `PILOT_PROBE_USERNAME`, and `PILOT_PROBE_STAFF` through a protected process environment. Never put a password in command arguments or saved scripts. The probe removes its own cloud draft and temporary browser profile.
+
+## Separate device-only authoring
+
+This guide describes authenticated Cloudflare read-only offline downloads. The new [Local Only edition](LOCAL-ONLY.md) is independent: its own origin, service-worker cache namespace and multi-apartment IndexedDB. It supports offline editing and uses OS/device protection plus encrypted exports; its project database is **not encrypted at rest**. It never opens or modifies this guide’s encrypted staff vault. The shared viewer source requires a future cloud shell cache bump (v8 is prepared in source), but this task does not redeploy or alter the hosted online app.

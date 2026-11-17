@@ -11,3 +11,7 @@ The [pilot handoff](PILOT.md) covers the physical Fold 7 test, staff onboarding 
 The hosted editor starts in the Apartment Gallery and guides staff through Upload Stitches, Connect Rooms, Review Layout and Preview & Publish. New tours connect doorways directly in the panorama; their relationship diagram is generated afterward without inferring doors from adjacency. Existing legacy layouts are preserved until staff explicitly convert them. See [the staff guide](STAFF.md). The older [synthetic application screenshots](docs/EDITOR-SCREENSHOTS.md) document the previous grid-first workflow.
 
 See [independent Cloudflare setup and upgrades](DISTRIBUTION.md), [architecture and deferred portability designs](ARCHITECTURE.md), [diagnostics and self-service support](DIAGNOSTICS.md), and [changelog](CHANGELOG.md). Version 0.2.0 remains subject to the documented release acceptance; no public distribution license has been selected.
+
+## Local Only edition
+
+For a separate device-only Gallery and the same modern editor, run `npm run start:local` and open http://localhost:4185. No Cloudflare login, data upload or synchronization is used. See [installation, storage and encrypted backups](LOCAL-ONLY.md) and [verified local acceptance](LOCAL-ACCEPTANCE.md). This edition does not replace the existing Cloudflare app.

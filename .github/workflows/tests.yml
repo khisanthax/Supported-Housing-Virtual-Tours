@@ -13,3 +13,18 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: node cloudflare/prepare.mjs
+  local-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:local:browser
+        env:
+          LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
+      - run: node local/migration-test.mjs "${{ runner.temp }}/local-tours-evidence/synthetic-roundtrip.shtour.zip"
+        env:
+          LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
