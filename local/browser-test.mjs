@@ -339,6 +339,8 @@ try {
       installUrlOrBundleUrl: origin + "/",
     });
     installed = true;
+    // DevTools installation defaults to browser mode; select the real app window.
+    await cdp.send("PWA.changeAppUserSettings",{manifestId:origin+"/",displayMode:"standalone"});
     await writeFile(
       join(output, "pwa-install.json"),
       JSON.stringify(
@@ -359,9 +361,11 @@ try {
   await context.setOffline(true);
   if (installed) {
     const browserCDP = await context.browser().newBrowserCDPSession();
+    const opened=context.waitForEvent('page');
     await browserCDP.send("PWA.launch", { manifestId: origin + "/" });
+    const appPage=await opened;await appPage.waitForURL(origin+'/');await page.close();page=appPage;page.setDefaultTimeout(20000);page.on('dialog',dialog=>dialog.accept());await ready();assert.equal(await page.evaluate(()=>matchMedia('(display-mode: standalone)').matches),true);
     pass(
-      "Previously installed PWA launched after process restart with server stopped",
+      "Installed standalone PWA window reopened and inspected offline after process restart",
     );
   }
   await page.goto(origin);
