@@ -26,16 +26,16 @@ const within=(promise,message)=>new Promise((resolve,reject)=>{const timer=setTi
 try {
   if (!isSecureContext || !navigator.serviceWorker)
     throw Error(
-      "Use localhost or a trusted HTTPS installation address. Opening files directly cannot install the PWA.",
+      "Offline caching is unavailable here. Use this website over HTTPS; online editing still saves only on this device.",
     );
   await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  await within(navigator.serviceWorker.ready,"Application caching did not finish. Keep the installation server available and reload before disconnecting. Your projects are unchanged.");
+  await within(navigator.serviceWorker.ready,"Application caching did not finish. Reconnect to this website and reload before going offline. Your saved projects are unchanged.");
   if (!navigator.serviceWorker.controller)
     await within(new Promise((resolve) =>
       navigator.serviceWorker.addEventListener("controllerchange", resolve, {
         once: true,
       }),
-    ),"Offline controller did not start. Reopen the application with the installation server available; your projects are unchanged.");
+    ),"Offline controller did not start. Reconnect to this website and reopen it; your saved projects are unchanged.");
   const verified = await new Promise((resolve) => {
     const channel = new MessageChannel(),
       timer = setTimeout(() => resolve(false), 15000);
@@ -49,7 +49,7 @@ try {
   });
   if (!verified)
     throw Error(
-      "Application caching is incomplete. Keep the static server available and reload before disconnecting.",
+      "Application caching is incomplete. Reconnect to this website and reload before going offline.",
     );
   if (status) {
     status.textContent = "Application ready offline";

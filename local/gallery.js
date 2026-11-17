@@ -64,6 +64,7 @@ function refresh() {
 }
 async function renderGallery() {
   const apartments = await localStore.list();
+  $("device-save-status").textContent="Saved on this device · "+apartments.length+" apartment(s). Keep encrypted backups.";
   urls.forEach(URL.revokeObjectURL);
   urls = [];
   $("catalog").replaceChildren();

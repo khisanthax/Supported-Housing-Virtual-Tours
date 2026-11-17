@@ -25,6 +25,10 @@ jobs:
       - run: npm run test:local:browser
         env:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
+      - run: npm run test:local:browser
+        env:
+          LOCAL_TEST_NO_INSTALL: '1'
+          LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-browser-evidence
       - run: node local/migration-test.mjs "${{ runner.temp }}/local-tours-evidence/synthetic-roundtrip.shtour.zip"
         env:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
