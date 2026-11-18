@@ -13,6 +13,10 @@ The dedicated website serves only the existing Local Only frontend. Staff open i
 
 Projects use this origin's IndexedDB and are **not encrypted at rest by the application**. Clearing browser data, storage eviction, private browsing limitations, uninstall/browser/device loss or a changed website address can remove access. Persistence permission reduces eviction risk, not all data-loss risks. Use device protection and encrypted backups. Copying a URL does not transfer projects. Older localhost projects require explicit encrypted export/import; no automatic migration or synchronization occurs.
 
+## If the website address changes
+
+The new address has its own empty device-local Gallery. Export encrypted backups at the old address before a planned move, then use **Import Backup** at the new address in each browser/device. Do not clear the old site's data until recovery is verified. If the old website no longer routes, its previously cached app may still open offline in the original browser/profile; this depends on retained browser caches and is not guaranteed. Use an existing encrypted backup if it cannot reopen. Cloud accounts and tours remain server-side, but staff must sign in again and existing guest invitations need the new hostname while preserving their path, fragment and access phrase.
+
 ## Privacy boundary
 
 - Photos, project records, layouts, edits and decrypted backups stay in the browser. Panorama reads use local Blob URLs. Apartment IDs stay in URL fragments, not HTTP request paths/query strings.

@@ -4,7 +4,7 @@ import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 export function staticSiteConfig({name,account,directory}){
  if(!/^[a-z][a-z0-9-]{3,50}$/.test(name)||!/^[a-f0-9]{32}$/.test(account))throw Error('Invalid dedicated website configuration.');
- if(name.includes('synthetic-pilot')||name.includes('firebase'))throw Error('Refusing to target an existing online application.');
+ if(name==='tours'||name.includes('synthetic-pilot')||name.includes('firebase'))throw Error('Refusing to target an existing online application.');
  return {name,account_id:account,compatibility_date:'2026-11-03',workers_dev:true,preview_urls:false,observability:{enabled:false},assets:{directory:resolve(directory),html_handling:'none',not_found_handling:'none'}};
 }
 export async function stageStaticSite(directory){
