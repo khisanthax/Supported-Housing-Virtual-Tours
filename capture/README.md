@@ -1,5 +1,19 @@
 # Isolated Capture Room experiment
 
+## Physical rotation report: recovery and full-viewport revision
+
+The owner reported a Fold 7 failure when upward aiming caused screen rotation. Investigation found reproducible code defects: the opening screen angle was treated as immutable, camera restart rejected other angles/aspect shapes, and the untracked fallback projected the target at the crosshair centre. Saved photos were intact, but selecting dots could not restore tracking/calibration. These explain the simulated failure paths; they do not prove the exact sequence of physical sensor events on that phone.
+
+Resume Capture now reconnects the camera and orientation listener, samples the current display angle and requires fresh sensor movement before saved-photo realignment. Unknown tracking hides the target instead of drawing false alignment. Rotation/background/camera interruption pause capture without closing the session. Completed target IDs persist; unfinished dots select the next target, and only an explicit retake replaces a completed photo. Inverted camera aspect uses a correspondingly inverted field of view per frame; other unexpected framing changes produce a recoverable error rather than guessed crop geometry. Pending camera requests are invalidated on pause/close.
+
+Capture uses a full-window dialog with persistent Pause/Resume, Retake, Settings, Realign, Fullscreen and Exit controls. The Fullscreen API is optional, invoked through a user gesture on the document element; the native dialog itself cannot be the fullscreen target. Leaving fullscreen leaves the full-window fallback usable. No orientation lock is required. Video uses contain fitting, and the target projection uses exactly the contained video rectangle. Letterboxing remains when the native camera frame and display differ; it is never stretched/cropped to fake coverage. Safe-area padding and portrait/landscape sizing are included.
+
+Run `node capture/recovery-browser-test.mjs` for rotated-angle resume, fresh-movement calibration, stale target hiding, remaining-target projection, refresh recovery, camera interruption, simulated background/resume, folded/unfolded/landscape geometry, Fullscreen entry/exit and API-unavailable fallback. Existing guided full-sweep and capture/stitch/editor/offline/encrypted-backup tests remain required. Simulated events and fake cameras are not physical acceptance. A sensor that continually emits identical valid values is indistinguishable from a truly stationary phone without another independent signal; the movement check prevents confirming a resumed frozen stream, but cannot certify all hardware sensor failures. Slow drift still needs matching the saved reference image.
+
+No stitching engine was replaced: this revision improves capture/UI reliability, not feature matching, exposure equalization, seam optimization or optical calibration. The licensed OpenCV and Stanford permission investigations below remain the next engine-quality options; no new dependency was adopted.
+
+Fold retest: open the temporary HTTPS site in Chrome, capture several wall photos, tilt/roll until the screen rotates, then Resume Capture while still rotated. Move gently to prove tracking, choose Realign, match the saved starting photo, select an unfinished dot and continue. Repeat after backgrounding, closing/reopening and refresh; confirm completed count stays unchanged. Test folded/unfolded and landscape, retake one photo, exit fullscreen, then stitch/inspect/export. Record browser/device behavior and visible seams. Physical Fold 7 acceptance remains open until this retest passes.
+
 Research verified 18 November 2026. **Deployed only to an owner-approved temporary HTTPS test site; not production-ready or a replacement for VFTCam.** No new third-party dependency or license was adopted. Both existing production websites and all live records remain untouched.
 
 ## Temporary Fold sensor test website

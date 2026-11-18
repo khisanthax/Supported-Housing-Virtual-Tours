@@ -18,7 +18,7 @@ try{
  assert.equal(await page.locator('#capture-fov,input[type=number]').count(),0);
  const state=()=>page.evaluate(async()=>{const {listSessions}=await import('/capture/store.js');return (await listSessions(location.origin+location.pathname+location.hash))[0]});
  const expectCount=n=>page.waitForFunction(n=>document.querySelector('#capture-count')?.textContent.startsWith(n+' of'),n);
- const hold=(yaw,pitch,duration=1100,offset=0,jitter=false)=>page.evaluate(async({yaw,pitch,duration,offset,jitter})=>{for(let elapsed=0,i=0;elapsed<=duration;elapsed+=60,i++){dispatchEvent(new DeviceOrientationEvent('deviceorientation',{alpha:-yaw*180/Math.PI+offset+(jitter?(i%2?2:-2):0),beta:90+pitch*180/Math.PI,gamma:0}));await new Promise(r=>setTimeout(r,60))}},{yaw,pitch,duration,offset,jitter});
+ const hold=(yaw,pitch,duration=1100,offset=0,jitter=false)=>page.evaluate(async({yaw,pitch,duration,offset,jitter})=>{for(let elapsed=0,i=0;elapsed<=duration;elapsed+=60,i++){dispatchEvent(new DeviceOrientationEvent('deviceorientation',{alpha:-yaw*180/Math.PI+offset+(i===0?.2:0)+(jitter?(i%2?2:-2):0),beta:90+pitch*180/Math.PI,gamma:0}));await new Promise(r=>setTimeout(r,60))}},{yaw,pitch,duration,offset,jitter});
  await hold(0,0,120);await hold(.2,0,300);assert.ok(parseFloat(await page.locator('#capture-aim').evaluate(n=>n.style.left))<50,'target moves opposite camera turn');
  await hold(0,0,600,0,true);assert.equal((await state()).frames.length,0,'moving inside target never captures');
  await hold(0,0,300);assert.equal((await state()).frames.length,0,'short hold never captures');
