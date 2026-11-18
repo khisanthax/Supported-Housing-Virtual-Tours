@@ -14,6 +14,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node capture/camera-test.mjs
       - run: node capture/recovery-browser-test.mjs
+      - run: node capture/quality-test.mjs
       - run: node capture/guidance-browser-test.mjs
       - run: node capture/browser-test.mjs
   test:
