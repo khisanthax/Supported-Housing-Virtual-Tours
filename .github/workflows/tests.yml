@@ -13,6 +13,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: node cloudflare/prepare.mjs
+      - run: npm run test:agency:emulator
   local-browser:
     runs-on: ubuntu-latest
     steps:
@@ -25,6 +26,7 @@ jobs:
       - run: npm run test:local:browser
         env:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
+      - run: npm run test:agency:browser
       - run: node local/migration-test.mjs "${{ runner.temp }}/local-tours-evidence/synthetic-roundtrip.shtour.zip"
         env:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence

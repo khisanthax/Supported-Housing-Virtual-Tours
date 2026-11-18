@@ -8,6 +8,7 @@ async function put(name,bytes) {
   await writeFile(url,bytes);
 }
 const copy = async (from,to) => put(to,await readFile(new URL(from,root)));
+for(const name of ['agency-setup.html','agency-setup.js','agency-setup.css'])await copy('cloudflare/'+name,'sharing/'+name);
 const common = ['styles.css','app.js','tour-data.js','room-grid.js','builder-data.js','layout-state.js','graph-tour.js','vendor/marzipano.js'];
 const index = await readFile(new URL('dist/index.html',root),'utf8');
 const guestViewer = index.replace('<body>','<body data-guest="true">')

@@ -1,4 +1,5 @@
 import {release} from './release.mjs';
+import {agencySetup} from './agency-setup.mjs';
 import {createDiagnostic,storeDiagnostic,diagnosticQuery,validateClientEvents,newTrace,tracePattern} from './diagnostics.mjs';
 import { uploadsApi } from './uploads-api.mjs';
 import { assertAdditiveUpload } from '../dist/uploads-data.js';
@@ -111,6 +112,14 @@ async function derivePassword(env,url,operation,data,diag=null) {
 
 function markDiagnosticResource(d,e){if(!d||!idPattern.test(e?.resource??''))return;if(e.action.startsWith('invitation.'))d.share=e.resource;else if(/^(apartment|uploads|backup)\./.test(e.action))d.apartment=e.resource;}
 async function handleRequest(request,env,privateStaffOnly=false) {
+  // Bootstrap is deliberately outside diagnostics/activity body inspection.
+  if(new URL(request.url).pathname==='/api/agency-setup'){
+    try{
+      if(env.AGENCY_BROWSER_SETUP!=='1')return output({error:'Not found.'},404);
+      if(!privateStaffOnly)return env.STAFF_LOGIN.getByName('agency-setup-v1').fetch(request);
+      return await agencySetup(request,env,password=>derivePassword(env,new URL(request.url),'hash',{password}));
+    }catch{return output({error:'Setup is temporarily unavailable. Return to the deployment wizard and retry; existing accounts are preserved.'},503);}
+  }
   const diagPath=new URL(request.url).pathname;
   const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
   if(diagnostic){request=new Request(request);request.headers.set('X-Operation-ID',diagnostic.operation);}
@@ -163,6 +172,21 @@ async function route(request,env,privateStaffOnly,diag=null) {
   if (!keyPattern.test(env.GUEST_CODE_KEY ?? '')) fail(503,'Guest access is unavailable.');
   const path=url.pathname;
   const method=request.method;
+  if(env.AGENCY_BROWSER_SETUP==='1'){
+    if(method==='GET'&&path==='/setup')return setupAsset('/sharing/agency-setup.html');
+    if(method==='GET'&&['/sharing/agency-setup.js','/sharing/agency-setup.css'].includes(path))return setupAsset(path);
+    const setup=await env.DB.withSession('first-primary').prepare('SELECT completed FROM agency_setup WHERE id=1').bind().first();
+    if(method==='GET'&&path==='/api/installation-health'){
+      const ledger=await env.DB.withSession('first-primary').prepare('SELECT COUNT(*) n,MIN(version) minimum,MAX(version) maximum FROM app_migrations').bind().first();
+      const prepared=ledger.n===release.schema&&ledger.minimum===1&&ledger.maximum===release.schema&&typeof env.PHOTOS?.get==='function'&&typeof env.STAFF_LOGIN?.getByName==='function';
+      return output({prepared,ready:prepared&&!!setup?.completed,version:release.version,schema:ledger.maximum??0});
+    }
+    if(!setup?.completed)fail(503,'Agency setup is not complete. Return to the deployment wizard to finish.');
+  }
+  async function setupAsset(path){
+    const response=await env.ASSETS.fetch(new Request(new URL(path,url)));
+    return new Response(response.body,{status:response.status,headers:{...Object.fromEntries(response.headers),...headers}});
+  }
   if (method!=='GET' && request.headers.get('Origin')!==url.origin) fail(403,'Invalid request origin.');
   const passwordAccounts=env.STAFF_AUTH_MODE==='password';
   const individualAccounts=passwordAccounts || env.STAFF_ACCOUNTS==='1';

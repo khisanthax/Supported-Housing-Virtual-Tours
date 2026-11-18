@@ -7,6 +7,9 @@
     "start:sharing": "node scripts/guest-server.mjs",
     "test": "node --test tests/*.test.mjs",
     "setup": "node cloudflare/install.mjs",
+    "start:agency": "node agency/server.mjs",
+    "test:agency:browser": "node cloudflare/prepare.mjs && node agency/browser-test.mjs",
+    "test:agency:emulator": "node cloudflare/prepare.mjs && node agency/emulator-test.mjs",
     "prepare": "node cloudflare/prepare.mjs",
     "build:local": "node local/build.mjs",
     "start:local": "node local/serve.mjs",
@@ -16,6 +19,7 @@
   "devDependencies": {
     "@inquirer/prompts": "7.8.4",
     "fake-indexeddb": "6.2.8",
+    "miniflare": "5.20261103.0-beta",
     "playwright": "1.64.1",
     "wrangler": "4.157.0"
   },

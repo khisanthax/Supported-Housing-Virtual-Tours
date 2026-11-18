@@ -1,5 +1,7 @@
 # Cloudflare installation and upgrades
 
+The [browser agency setup development preview](AGENCY-SETUP.md) adds an OAuth companion and guarded browser Administrator bootstrap. It is not a public one-click release: publisher hosting/OAuth authorization, actual Free-plan evidence, independent hosted acceptance and update integration remain open. The existing terminal-guided installer below remains available and unchanged. See [publisher integration and evidence](agency/README.md) before using any deployment link.
+
 Version 0.2.0, schema 4. This is the Cloudflare edition. Local Only and Linux editions are designs, not products. Repository distribution/licensing terms still require the owner's decision; this change does not publish a release or select a license.
 
 ## Independent installation
