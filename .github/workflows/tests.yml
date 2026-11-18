@@ -42,4 +42,5 @@ jobs:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-browser-evidence
       - run: node local/migration-test.mjs "${{ runner.temp }}/local-tours-evidence/synthetic-roundtrip.shtour.zip"
         env:
+          CAPTURE_TEST: '1'
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence

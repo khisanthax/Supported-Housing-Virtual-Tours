@@ -12,6 +12,7 @@ import worker, { StaffLogin } from "../cloudflare/worker.mjs";
 import { hashStaffPassword } from "../cloudflare/staff-password.mjs";
 import { decryptBackup } from "../dist/encrypted-backup.js";
 await import("../cloudflare/prepare.mjs");
+const captureTest=process.env.CAPTURE_TEST==='1';
 const path = process.argv[2];
 if (!path)
   throw Error("Provide the synthetic Local Only acceptance export path.");
@@ -79,9 +80,9 @@ const env = {
     async fetch(request) {
       try {
         const path = new URL(request.url).pathname;
-        const data = await readFile(
-          new URL("../cloudflare/generated" + path, import.meta.url),
-        );
+        let data = await readFile(new URL(captureTest&&path.startsWith('/staff/editor/capture/')?'../capture/'+path.split('/').pop():'../cloudflare/generated'+path,import.meta.url));
+        if(captureTest&&path==='/staff/editor/editor-runtime.js')data=Buffer.from("import {captureRoom} from './capture/ui.js';\n"+data.toString().replace('  applyAccess,','  applyAccess, captureRoom:options=>captureRoom({...options,syntheticBench:true}),'));
+        if(captureTest&&path==='/staff/editor/index.html')data=Buffer.from(data.toString().replace('<head>','<head><link rel="stylesheet" href="capture/style.css">'));
         const type = path.endsWith(".js")
           ? "text/javascript"
           : path.endsWith(".css")
@@ -142,7 +143,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 origin = "http://localhost:" + server.address().port;
-const browser = await chromium.launch({ channel: "chromium" }),
+const browser = await chromium.launch({ channel: "chromium",args:["--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"] }),
   context = await browser.newContext(),
   page = await context.newPage(),
   errors = [];
@@ -184,6 +185,26 @@ try {
     );
   assert.equal(db.prepare("SELECT COUNT(*) n FROM shares").get().n, 0);
   assert.ok(row.available > Date.now());
+  if(captureTest){
+    const before=uploads;
+    await page.goto(origin+'/staff/editor/?apartment='+row.apartment);
+    await page.locator('#guide-capture').click();await page.locator('#capture-synthetic').click();
+    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('38 /'));
+    await page.locator('#capture-resolution').selectOption('1024');await page.locator('#capture-name').fill('Synthetic Cloud capture');
+    await page.locator('#capture-stitch').click();await page.waitForFunction(()=>document.querySelector('#capture-message')?.textContent.startsWith('Preview:'),{},{timeout:120000});
+    assert.equal(uploads,before,'No upload before approval');
+    await page.locator('#capture-approved').check();await page.locator('#capture-use').click();
+    await page.waitForFunction(()=>document.querySelector('#guide-status').textContent.includes('Captured panorama saved'));
+    assert.equal(uploads,before+1,'Only the accepted completed JPEG is uploaded');
+    const latest=db.prepare('SELECT * FROM versions WHERE apartment=? ORDER BY seq DESC LIMIT 1').get(row.apartment);
+    assert.equal(JSON.parse(latest.manifest).rooms.length,draft.tour.rooms.length+1);
+    assert.deepEqual(JSON.parse(db.prepare('SELECT manifest FROM versions WHERE apartment=? AND seq=?').get(row.apartment,row.seq).manifest),draft.tour);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM shares').get().n,0);
+    await page.reload();await page.locator('#guide-capture').waitFor();
+    assert.ok((await page.locator('#upload-workspace').textContent()).includes('Synthetic Cloud capture'));
+    const anonymous=await browser.newContext();const denied=await anonymous.request.post(origin+'/api/staff/photos',{data:Buffer.from('synthetic invalid photo'),headers:{Origin:origin,'Content-Type':'image/jpeg'}});assert.equal(denied.status(),401);await anonymous.close();
+    console.log('PASS Capture Cloud emulator: authenticated existing upload API, no upload before approval, one completed JPEG after approval, private revision, reload, unchanged previous version and anonymous denial.');
+  }
   assert.deepEqual(errors, []);
   const output =
     process.env.LOCAL_TEST_OUTPUT ??
