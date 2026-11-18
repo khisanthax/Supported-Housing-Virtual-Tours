@@ -13,6 +13,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node capture/camera-test.mjs
+      - run: node capture/guidance-browser-test.mjs
       - run: node capture/browser-test.mjs
   test:
     runs-on: ubuntu-latest

@@ -189,8 +189,8 @@ try {
     const before=uploads;
     await page.goto(origin+'/staff/editor/?apartment='+row.apartment);
     await page.locator('#guide-capture').click();await page.locator('#capture-synthetic').click();
-    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('38 /'));
-    await page.locator('#capture-resolution').selectOption('1024');await page.locator('#capture-name').fill('Synthetic Cloud capture');
+    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('38 of'));
+    await page.locator('#capture-settings').evaluate(d=>d.open=true);await page.locator('#capture-resolution').selectOption('1024');await page.locator('#capture-name').fill('Synthetic Cloud capture');
     await page.locator('#capture-stitch').click();await page.waitForFunction(()=>document.querySelector('#capture-message')?.textContent.startsWith('Preview:'),{},{timeout:120000});
     assert.equal(uploads,before,'No upload before approval');
     await page.locator('#capture-approved').check();await page.locator('#capture-use').click();

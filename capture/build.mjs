@@ -6,7 +6,7 @@ const source=new URL('../local/generated/',import.meta.url),out=new URL('./gener
 const manifest=JSON.parse(await readFile(new URL('assets.json',source)));
 const files=new Map();
 for(const path of manifest.files)if(path!=='/sw.js')files.set(path,await readFile(new URL('.'+path,source)));
-for(const name of ['math.js','store.js','ui.js','style.css','stitch-worker.js','synthetic.js'])files.set('/capture/'+name,await readFile(new URL(name,import.meta.url)));
+for(const name of ['math.js','guidance.js','store.js','ui.js','style.css','stitch-worker.js','synthetic.js'])files.set('/capture/'+name,await readFile(new URL(name,import.meta.url)));
 const runtime=files.get('/dist/editor-runtime.js').toString();
 files.set('/dist/editor-runtime.js',Buffer.from("import {captureRoom} from '/capture/ui.js';\n"+runtime.replace('export default { edition, storage, getAccess, can, applyAccess };',"export default { edition, storage, getAccess, can, applyAccess, captureRoom: options=>captureRoom({...options,syntheticBench:true}) };")));
 files.set('/editor/index.html',Buffer.from(files.get('/editor/index.html').toString().replace('<head>','<head><link rel="stylesheet" href="/capture/style.css">').replace('LOCAL ONLY','LOCAL CAPTURE PROTOTYPE — NOT PRODUCTION')));
