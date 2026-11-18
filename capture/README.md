@@ -1,6 +1,12 @@
 # Isolated Capture Room experiment
 
-Research verified 18 November 2026. **Not deployed, not production-ready, not a replacement for VFTCam.** No new third-party dependency or license was adopted. Both existing websites and all live records remain untouched.
+Research verified 18 November 2026. **Deployed only to an owner-approved temporary HTTPS test site; not production-ready or a replacement for VFTCam.** No new third-party dependency or license was adopted. Both existing production websites and all live records remain untouched.
+
+## Temporary Fold sensor test website
+
+Open <https://capture-test.leveltwo360.workers.dev/> directly in Chrome. Create a test apartment, choose Capture Room, start the rear camera and allow camera/motion permissions. Hold the phone upright and follow the empty circles. The source is PR #49 commit `c496cc3`; physical Fold/iOS acceptance remains pending.
+
+Only application assets are hosted. There are no database/storage bindings, uploaded JPEG photographs, project records, telemetry or synchronization. Raw captures, accepted panoramas and drafts remain in this origin's local IndexedDB, separate from both production editions. Export encrypted backups before clearing browser data or retiring the temporary test origin. Only this separate host permits camera/orientation sensors; production headers were not changed. Deployment configuration and verification evidence remain in private operator storage. PR #49 remains unmerged and production capture remains disabled.
 
 ## Run and demonstrate
 
