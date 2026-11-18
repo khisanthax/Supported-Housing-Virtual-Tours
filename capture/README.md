@@ -1,0 +1,66 @@
+# Isolated Capture Room experiment
+
+Research verified 18 November 2026. **Not deployed, not production-ready, not a replacement for VFTCam.** No new third-party dependency or license was adopted. Both existing websites and all live records remain untouched.
+
+## Run and demonstrate
+
+For a developer with the existing repository dependencies: `node capture/serve.mjs`, then open <http://localhost:4196/editor/#new>. This is an isolated loopback origin, not a staff-facing installation. Name the apartment, choose **Capture Room**, and either start the camera deliberately or load the clearly labeled synthetic test captures. Set viewpoint name/group, create the panorama, inspect it in Marzipano, check approval and accept. The finished JPEG enters the current four-step editor, ready for the existing doorway controls. Manual JPEG/ZIP imports remain available. Close keeps source captures; the saved-session selector can reopen or delete them. Retake replaces one direction. No capture is auto-accepted.
+
+The Local Only gallery is at <http://localhost:4196/>. Source frames use the separate `leveltwo360-capture-prototype-v1` IndexedDB database. Apartment projects use the existing Local Only store on this isolated origin. Clearing this browser's data can erase both; neither is application-encrypted at rest. Exported apartment backups retain the existing AES-256-GCM protection. **Raw source frames are not included in .shtour backups.** The prototype retains source frames after acceptance so they can be retried or explicitly deleted.
+
+`node capture/camera-test.mjs` uses Chromium's fake camera, never operator hardware. `node capture/browser-test.mjs` performs synthetic capture-to-editor, worker benchmarks, offline restart and request inspection. `npm test` runs the full unit/integration suite. Existing `node local/browser-test.mjs` verifies the unchanged editor, connections and encrypted backup flows separately. Browser scripts print private temporary evidence paths; screenshots contain only synthetic fixtures.
+
+## Stanford findings and reuse decision
+
+[Stanford's About page](https://vftcam.stanford.edu/about.html) describes guided sensor capture and local WebGL processing. Its footer reserves rights. The bounded first-party/repository search found technical documentation but **no verified application source license granting modification/redistribution**. Publicly delivered JavaScript and published snippets are not permission to incorporate them. No Stanford code, shaders or assets were copied. Reusable-component permission and a supported integration API remain unverified; no documented embeddable SDK was located.
+
+[The technical description](https://vftcam.stanford.edu/building-vftcam.html) describes browser camera/sensors, ES modules, WebGL2, local browser storage and equirectangular JPEG export. It lists Three.js, Pannellum, piexif, Workbox, icons and JSZip despite its dependency-free wording. Their individual licenses do not license VFTCam itself. It reports Android/iOS support and fast phone processing; those are vendor claims, not our measurements. The article's code samples were not reused.
+
+[Stanford's privacy policy](https://vftcam.stanford.edu/privacy-policy.html) says capture, stitching and storage occur on-device and distinguishes optional location/maps behavior. This is documentary evidence, not a network audit of the current application. Exact deployed dependencies, offline operation, export metadata, output quality and programmatic reuse would require permission and version-specific inspection. We have not benchmarked Stanford side-by-side.
+
+## Options and recommendation
+
+| Approach | License/status | Quality and complexity | Phone, offline and maintenance |
+|---|---|---|---|
+| A: licensed VFTCam component reuse | Permission not established; blocked from adoption | Potentially shortest integration if a maintained API/license is supplied; quality still requires comparison | Claimed local/browser support; exact dependencies, network and API need audit |
+| B: maintained OpenCV/WASM alignment | [OpenCV 4.5+ is Apache-2.0](https://opencv.org/license/); pin exact source and review build dependencies before adoption | Best next technical investigation for feature matching, camera estimation and blending; significant specialist integration | [Official JS build documentation](https://docs.opencv.org/4.13.0/d4/da1/tutorial_js_setup.html) uses Emscripten; a complete panorama pipeline is not established merely by loading a stock JS file. WASM heap/download size and mobile performance need measurement; bundle locally for offline |
+| B: imgalign | [Repository](https://github.com/latsic/imgalign) describes MIT except otherwise noted; dependency license audit incomplete; not adopted | Existing browser alignment example, but age/toolchain and bundled algorithms require review | Useful feasibility reference, not yet a vetted maintained mobile SDK |
+| B: Hugin | [Project manual](https://hugin.sourceforge.io/docs/manual/Hugin.html) documents a desktop panorama toolchain; exact redistribution review deferred because not adopted | Established alignment/exposure features, but desktop tools do not satisfy browser-only capture | Porting the full native pipeline would be substantial; avoid pretending it is a drop-in web library |
+| C: independent pose reprojection (this experiment) | Original implementation, existing Marzipano notices retained; no new license decision | Low dependency/integration cost, limited quality: no feature matching, bundle adjustment, lens correction, exposure equalization, ghost removal or seam optimization | Worker keeps UI responsive, sequential frame decoding bounds major allocations; needs calibrated FOV and stable rotation. Offline desktop Chromium verified; real phone quality unknown |
+
+Recommendation: use C only to validate capture/storage/approval/editor plumbing. Continue using externally completed stitched JPEGs for real staff work. First request a clear component license/API from VFTCam's maintainer; otherwise evaluate a pinned Apache-2.0 OpenCV feature-alignment build against real device captures. Do not expand this simple blender into an unbounded substitute for mature stitching software. No uncertain-license dependency is installed by this branch.
+
+## Architecture and guardrails
+
+- Capture permission is requested only by Start rear camera. Rear camera is requested as a preference, not guaranteed by browsers. Sensor permission is a separate gesture where the API requires it. Camera access needs a secure context: [camera API requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
+- Independently implemented pinhole/rotation math follows the [W3C orientation coordinate conventions](https://www.w3.org/TR/orientation-event/). Device lens offset, FOV and drift are not calibrated automatically. Manual aiming is explicitly labeled estimated. Sampled angular coverage cannot detect blurred frames or mistaken aiming.
+- Adaptive capture plans include both poles and typically use 37–49 photos depending on aspect/FOV (38 for the synthetic portrait fixture). Per-session limits are 64 frames and 64 MiB source JPEGs. IndexedDB transactions reject stale writes; failed writes keep the previous record. Browser quota/eviction is not a permanent backup guarantee.
+- Worker reprojects and feather-blends one decoded image at a time into a full sphere. Any uncovered output pixel causes failure instead of fabricated content. Cancel terminates the worker; source JPEGs survive. Backgrounding stops processing/camera; orientation changes stop capture and require the original orientation. No service processes photographs remotely.
+- Outputs are standard 2:1 JPEGs at explicitly chosen resolution/quality. No XMP/EXIF compatibility claim. Existing 4 MiB/8192×4096 limits remain unchanged. Oversized output is rejected with instructions, never silently recompressed. Sparse synthetic imagery fits easily; detailed/noisy real 4096 panoramas may not. Do not increase production limits without representative phone JPEG/storage tests.
+- A capability-gated hook in the existing guided editor receives an approved JPEG, validates it, checks duplicate bytes and uses the existing revision-checked draft save. It does not replace the editor/viewer. Production runtimes define no capture capability, so no Capture Room control appears there.
+- The isolated build injects that capability only into a staged Local Only runtime. It caches all capture assets under a distinct service-worker cache. Existing Local Only network blockers/CSP remain; server only accepts GET/HEAD. There are no upload endpoints.
+- The shared hook also works with a capability-enabled Cloud runtime and checks edit/upload capabilities before using existing storage. Its approval wording explicitly names upload. **A Cloud capture-specific authenticated emulator/browser acceptance has not been completed; no live capture upload was tested or enabled.** Existing Cloud authorization regression tests do not by themselves close that gate. No raw-frame API exists.
+
+## Measurements and acceptance boundaries
+
+Desktop Chromium, 38 generated 360×480 perspective JPEGs with exact known poses; smooth analytic environment with high-contrast angular lines. This deliberately easy fixture is not representative indoor photography. Increasing output size does not create additional source detail.
+
+| Output / quality | Output bytes | Observed worker time (representative run) | Estimated major working allocations |
+|---|---:|---:|---:|
+| 1024×512 / 92% | 125,936 | 0.46 s | 40.0 MB |
+| 2048×1024 / 92% | 285,164 | 1.47 s | 71.4 MB |
+| 4096×2048 / 92% | 665,515 | 4.72 s | 197.3 MB |
+| 2048×1024 / 70% | 146,982 | 1.40 s | 71.4 MB |
+| 2048×1024 / 98% | 525,173 | 1.41 s | 71.4 MB |
+
+Times vary with desktop load and headless graphics; not mobile benchmarks. Memory numbers are array/decode estimates, **not measured peak process/GPU memory**. JPEG encoding, browser copies and the viewer can add substantial memory. Sensor capture duration and phone thermal stability were not measured. Synthetic absolute RGB error at 1024/92% was 5.68/255; alternating 0.8/1.2 exposure increased it to 18.10/255. This quantifies a limitation, not a perceptual indoor quality certification. Known-pose lines can still show resampling/feathering softness; pose errors, parallax and moving subjects can duplicate objects and create severe seams. Those real-world defects have no automatic repair here.
+
+Verified locally: all 103 regression tests; capture-session persistence/stale-save/bounds tests; full existing Local Only browser flow including encrypted backup/recovery; new capture acceptance, exact JPEG/tour encrypted-backup roundtrip and browser-process restart; offline worker stitching; analytic coverage rejection; zero external/non-GET requests; responsive dialog checks at 412/768/1104 px; fake camera gesture/retake/reload/track-stop checks. Screen simulation is not physical Android acceptance. Synthetic permission denial is injected in a browser test, not an OS-level permissions test. Actual quota exhaustion/OS termination, WebKit, iPhone/iPad and physical camera quality remain unverified.
+
+## Next gates and effort estimate
+
+No Android device was connected through ADB during investigation. A physical phone cannot use this PC's localhost camera context; an approved isolated HTTPS test site or a connected device with a supported local forwarding setup is needed. Public deployment is explicitly outside this task's authorization.
+
+Short physical checklist: allow/deny camera and sensors; calibrate rear lens FOV; capture a vacant synthetic/test room with floor/ceiling, retake one direction, rotate near the lens; background/rotate/reopen mid-capture; stitch at 2048 then 4096; inspect seams/objects/exposure in every direction; accept and connect two rooms; export encrypted backup; restart offline and repeat. Test Fold folded/unfolded and Safari separately. Record time, output bytes, crashes and device model; do not send actual agency photos.
+
+Estimated engineering effort (uncertain, not a delivery commitment): 2–5 days of controlled phone capture/quality validation; 1–2 weeks for licensed-engine proof of concept and measured phone memory/performance; approximately 4–8+ further weeks for robust calibration/alignment/blending, recovery, Cloud emulator acceptance, privacy/security and cross-device field acceptance. A licensed maintained VFTCam SDK could reduce that effort, but neither availability nor terms is established. Physical quality and a maintainable licensed alignment engine are release blockers. Production integration and any public deployment require a separate decision.

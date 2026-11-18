@@ -78,7 +78,7 @@ export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pau
   function render(){
     urls.forEach(URL.revokeObjectURL);urls=[];$('guide-title').value=draft.tour.title;
     $('guide-steps').replaceChildren(...names.map((name,i)=>{const b=button((i+1)+'. '+name,()=>go(i+1));b.setAttribute('aria-current',step===i+1?'step':'false');return b;}));
-    $('guide-step-title').textContent=names[step-1];$('upload-workspace').hidden=step!==1;$('guide-workspace').hidden=step!==3;$('tour-review').hidden=step===1;uploads.render(draft);for(const id of ['guide-add-stitch','guide-add-room','guide-backup'])$(id).hidden=step!==1;document.querySelector('.guide-file').hidden=step!==1;$('guide-undo').hidden=step!==2&&step!==3;$('guide-reset').hidden=step!==3;$('guide-restore').hidden=step!==3||!draft.tour.layoutCheckpoint;$('guide-drawer').hidden=step!==3;$('guide-panorama').hidden=(step===1||step===3);$('guide-cell-tools').hidden=step===1;
+    $('guide-step-title').textContent=names[step-1];$('upload-workspace').hidden=step!==1;if($('guide-capture'))$('guide-capture').hidden=step!==1;$('guide-workspace').hidden=step!==3;$('tour-review').hidden=step===1;uploads.render(draft);for(const id of ['guide-add-stitch','guide-add-room','guide-backup'])$(id).hidden=step!==1;document.querySelector('.guide-file').hidden=step!==1;$('guide-undo').hidden=step!==2&&step!==3;$('guide-reset').hidden=step!==3;$('guide-restore').hidden=step!==3||!draft.tour.layoutCheckpoint;$('guide-drawer').hidden=step!==3;$('guide-panorama').hidden=(step===1||step===3);$('guide-cell-tools').hidden=step===1;
     $('doorway-instructions').hidden=step!==2;$('guide-another-label').hidden=step!==2;syncUndo();$('guide-publish').hidden=step!==4||!can(access,'apartment.edit');$('guide-start').hidden=step!==2;$('guide-prev').disabled=step===1;$('guide-next').hidden=step===4;
     $('guide-count').textContent=draft.tour.rooms.length+' viewpoints'+(step===1?'': ' · '+draft.tour.rooms.filter(r=>!reachable(draft.tour).has(r.id)&&!draft.tour.builder.excluded?.includes(r.id)).length+' unconnected');
     const strip=$('filmstrip');strip.replaceChildren(el('h2','Your stitched photos'));
@@ -142,6 +142,22 @@ export async function createGuidedEditor({showTour,currentRoom,coordinatesAt,pau
   $('guide-generate').onclick=async()=>{if(!confirm('Regenerate only this relationship diagram from saved doorways? Navigation and JPEGs remain. Undo restores manual positions.'))return;await change(n=>generateLayout(n.tour,{regenerate:true}),'Layout regenerated. Doorways unchanged.',undefined,'Regenerate layout');};
   $('guide-workflow').onclick=async()=>{if(!confirm('Use doorway connections as the source of truth? Saved tiles and connections stay; adjacency will stop creating new doors.'))return;await change(n=>{n.tour.layoutCheckpoint??={version:1,created:Date.now(),layout:captureLayout(n.tour)};enablePanorama(n.tour);},'Panorama workflow enabled. Existing layout and links retained.',undefined,'Choose panorama workflow');};
   $('guide-title').onchange=()=>{const value=$('guide-title').value.trim();if(value)change(n=>n.tour.title=value).catch(()=>{});else say('Enter an apartment name.');};
+  if(typeof runtime.captureRoom==='function'&&can(access,'apartment.edit')&&can(access,'image.upload')){
+    const capture=button('Capture Room',async()=>{try{
+      if(busy)throw Error('Wait for the current save.');
+      const captureIdentity=()=>location.origin+location.pathname+location.search+location.hash,apartmentKey=captureIdentity();
+      const accepted=await runtime.captureRoom({apartmentKey,localOnly:edition.localOnly});
+      if(!accepted)return;
+      if(captureIdentity()!==apartmentKey)throw Error('Apartment changed during capture. Reopen the original apartment to accept its saved capture.');
+      if(!can(access,'apartment.edit')||!can(access,'image.upload'))throw Error('Upload permission required.');
+      await verify(accepted.file);
+      const digest=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).join(',');
+      const hash=await digest(accepted.file);
+      for(const image of draft.images.values())if(await digest(image)===hash)throw Error('This panorama is already in the apartment. No duplicate was added.');
+      await change(next=>{const id=addIncompleteRoom(next.tour,accepted.name),r=next.tour.rooms.find(r=>r.id===id);if(accepted.roomName)r.roomName=accepted.roomName;next.images.set(id,accepted.file);next.tour.builder.missing=next.tour.builder.missing.filter(x=>x!==id);selected=id;},'Captured panorama saved to the private draft.');
+      try{await accepted.committed()}catch{say('Panorama saved. Capture receipt could not be updated; source photographs are still kept on this device.');}
+    }catch(error){say(error.message)}});capture.id='guide-capture';$('guide-add-stitch').after(capture);
+  }
   $('guide-add-stitch').onclick=()=>{$('guide-workspace').classList.remove('drawer-collapsed');$('guide-drawer').setAttribute('aria-expanded','true');$('guide-files').click();};
   $('guide-files').onchange=async e=>{const files=[...e.target.files];e.target.value='';try{await reviewBatch(files,draft,verify,async (chosen,progress,trace)=>{
     await change(next=>{for(const row of chosen){let r=next.tour.rooms.find(r=>r.id===row.assignment);if(!r){const id=addIncompleteRoom(next.tour,row.name);r=next.tour.rooms.find(r=>r.id===id);}r.name=row.name;next.images.set(r.id,row.file);next.tour.builder.missing=next.tour.builder.missing.filter(id=>id!==r.id);selected=r.id;}},'Stitches saved. Open Connect Rooms to drag room handles onto doorways.',progress,undefined,trace);
