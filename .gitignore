@@ -25,3 +25,5 @@ cloudflare/cloudflare/
 **/.wrangler/
 
 local/generated/
+
+capture/generated/
