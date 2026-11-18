@@ -1,0 +1,9 @@
+# Public synthetic demo snapshot
+
+This operator-only builder reuses the existing Marzipano viewer in read-only guest mode to create an assets-only public demonstration. It has no account, phrase, staff editor, database, KV or other private storage binding. Anyone with the resulting URL can read its approved synthetic photographs. Robots exclusions discourage indexing; they are not access control.
+
+`buildPublicDemo({tour, images, directory, syntheticApproved: true})` requires an explicitly approved synthetic tour and an exact Map of original JPEG bytes keyed by viewpoint ID. The output directory must be fresh. Metadata is allowlisted to viewer fields, pending doorway positions are omitted, and no reverse coordinates are invented. The builder performs no cloud reads or deployment itself. Source photographs and installation configurations stay outside Git.
+
+An authorized operator can retrieve a specifically approved published synthetic version, build the snapshot, and deploy only that directory through a separate assets-only Workers Free configuration. Never deploy from a repository sweep, target the protected online or Local Only Worker, export agency photographs, or infer publication approval from an existing private draft. The snapshot does not synchronize subsequent editor changes. Exporting it neither changes the private draft nor grants guest permissions.
+
+Verify root routing, every sphere, room selection, original-byte parity, mobile viewports, no account/editor/API surface, zero backend bindings and unchanged protected-app authorization. Existing private invitation requirements remain enforced in the online edition. The recovered eight-viewpoint demo's existing publication has no positioned doorway links; its room selector provides navigation.
