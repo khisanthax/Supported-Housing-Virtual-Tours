@@ -5,7 +5,7 @@ import {saveSession,findSession,listSessions,deleteSession} from './store.js';
 const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textContent=text;return n};
 const blobOf=canvas=>new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Camera photo could not be encoded.')),'image/jpeg',.95));
 const fresh=at=>performance.now()-at<350;
-const newSession=apartment=>({id:crypto.randomUUID(),apartment,revision:0,frames:[],hfov:65,aspect:4/3,plannerVersion:2,targets:capturePlan(65,4/3,planningOptions(false)),state:'capturing',updated:Date.now()});
+const newSession=apartment=>({id:crypto.randomUUID(),apartment,revision:0,frames:[],hfov:65,aspect:4/3,plannerVersion:2,targets:capturePlan(65,4/3,planningOptions()),state:'capturing',updated:Date.now()});
 
 export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=false}){
  if(!apartmentKey)throw Error('Select an apartment first.');
@@ -169,7 +169,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
    const aspect=$('video').videoWidth/$('video').videoHeight;
    liveAspect=aspect;liveFov=session.hfov;if(session.frames.length&&Math.abs(aspect-session.aspect)>.02){if(Math.abs(aspect-1/session.aspect)>.03)throw Error('Camera framing changed. Restore the same lens/framing, then Resume Capture; all photos are kept.');liveFov=transposeFOV(session.hfov,session.aspect);}
    if(session.cameraBinding&&session.cameraBinding!==await cameraBinding())throw Error('Camera lens, zoom or framing changed. Start another capture for camera setup; existing photos are kept.');
-   if(!session.frames.length&&!session.cameraCalibration){session.aspect=aspect;session.targets=capturePlan(session.hfov,aspect,session.plannerVersion===2?planningOptions(false):undefined);index=0;delete session.heading;await saveSession(session)}
+   if(!session.frames.length&&!session.cameraCalibration){session.aspect=aspect;session.targets=capturePlan(session.hfov,aspect,session.plannerVersion===2?planningOptions():undefined);index=0;delete session.heading;await saveSession(session)}
    if(!session.frames.length&&session.cameraCalibration&&Math.abs(aspect-session.aspect)>.02){if(Math.abs(aspect-1/session.aspect)>.03)throw Error('Camera framing changed. Start another capture to estimate it again.');liveFov=transposeFOV(session.hfov,session.aspect);}
    if(liveFov<35||liveFov>100)throw Error('This camera framing is outside the prototype range. Use the standard rear lens and start another capture; saved photos are kept.');
    fit();stream.getVideoTracks().forEach(track=>track.addEventListener('ended',()=>{if(stream?.getTracks().includes(track)){stopCamera();say('Camera interrupted. Tap Resume Capture; saved photos are kept.');guidance()}}));

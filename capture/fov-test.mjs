@@ -11,7 +11,7 @@ try{
  const results=await page.evaluate(async()=>{
  const {capturePlan}=await import('/capture/guidance.js'),{basis,rad,overlapStats}=await import('/capture/math.js'),{planningOptions}=await import('/capture/calibration.js'),{syntheticFrames}=await import('/capture/synthetic.js'),{indoorColor}=await import('/capture/indoor-fixture.js');
  const reference37=[];for(const[pitch,count]of[[0,13],[45,11],[-45,11],[90,1],[-90,1]])for(let i=0;i<count;i++)reference37.push({id:'reference-'+reference37.length,yaw:rad(360*i/count),pitch:rad(pitch)});
- const plans=[['legacy25',capturePlan(65,.75),65],['reference37',reference37,65],['uncertainDense',capturePlan(65,.75,planningOptions(false)),65],['measuredDense',capturePlan(60,.75,planningOptions(true)),60]],results=[];
+ const plans=[['legacy25',capturePlan(65,.75),65],['reference37',reference37,65],['uncertainDense',capturePlan(65,.75,planningOptions()),65],['measuredDense',capturePlan(60,.75,planningOptions()),60]],results=[];
  for(const[label,targets,assumedFOV]of plans){
  const stats={};for(const actual of[50,55,60,65])stats[actual]=overlapStats(targets.map(t=>({pose:basis(t.yaw,t.pitch),aspect:.75,hfov:actual})));
  const {frames}=await syntheticFrames({width:360,height:480,hfov:60,scene:indoorColor,targets});const metadata=frames.map(f=>({...f,hfov:assumedFOV}));

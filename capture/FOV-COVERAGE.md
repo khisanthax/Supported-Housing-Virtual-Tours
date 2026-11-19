@@ -25,7 +25,7 @@ These are geometric sensitivity calculations, not measurements of true optical c
 
 ## Device-independent changes
 
-New sessions use planner version 2: 40% nominal angular overlap, plus tangent-plane FOV reduced to 85% while unmeasured or 95% following the visual estimate. These margins are engineering assumptions, not measured confidence intervals. At the 65-degree prior this produces 39 targets at 3:4, 53 at 4:3 and 67 at 16:9. At measured 60 degrees and 3:4 it produces 37. Counts follow geometry, not a hardcoded 37.
+New sessions use planner version 2: 40% nominal angular overlap, plus tangent-plane FOV reduced to 85%, retained after the visual estimate because it is not certified optical calibration. These margins are engineering assumptions, not measured confidence intervals. At the 65-degree prior this produces 39 targets at 3:4, 53 at 4:3 and 67 at 16:9. At measured 60 degrees and 3:4 it produces 39. Counts follow geometry, not a hardcoded 37.
 
 Existing partial/completed sessions retain targets, poses, FOV, original JPEGs and recovery. Start another capture for the new pattern. Legacy sessions keep a 64-frame bound; new version-2 sessions allow 96, under the unchanged 64 MiB source cap and 4 MiB/frame limit. Framing exceeding the plan bound is rejected rather than silently reducing overlap. Larger-plan phone memory and timing remain unverified.
 
@@ -37,7 +37,7 @@ Optional **Camera setup**, before the first photograph:
 4. Rotate back until it reaches the right marker; confirm.
 5. Live sensor axes and marker positions estimate horizontal FOV. Stale readings, wrong side, excessive height error, unsupported range and disagreement reject the estimate.
 
-No degree entry, model lookup, server call or image upload is used. The result is explicitly a visual/sensor **estimate**, not full intrinsic/distortion calibration. Accuracy depends on careful aiming, distance, minimal translation and sensors. Up to 10% disagreement in tangent scale is allowed; the subsequent planning margin is not a guaranteed optical accuracy bound. With missing sensors the existing manual fallback remains uncalibrated. Setup cannot change sessions containing photographs.
+No degree entry, model lookup, server call or image upload is used. The result is explicitly a visual/sensor **estimate**, not full intrinsic/distortion calibration. Accuracy depends on careful aiming, distance, minimal translation and sensors. Up to 10% disagreement in tangent scale is allowed; the retained planning margin is not a guaranteed optical accuracy bound. With missing sensors the existing manual fallback remains uncalibrated. Setup cannot change sessions containing photographs.
 
 Estimates and plans persist locally and in source ZIP metadata. Reciprocal FOV geometry handles portrait/landscape changes. A best-effort hash of camera label/facing, aspect, zoom and resize mode detects evident stream changes. Browser device IDs are not used because they may change after reopening. Camera labels can be absent/ambiguous; hidden crop, lens and stabilization changes cannot all be detected. Repeat setup in a new session if framing changes. Rotation, camera loss or backgrounding cancels unfinished setup without deleting captures.
 
@@ -47,12 +47,12 @@ Same procedural indoor scene, true FOV 60 degrees, portrait 360x480 source image
 
 | Plan | Photos | Render FOV | Two-image coverage at true FOV | RGB MAE /255 | False-edge proxy | Desktop worker time | JPEG bytes |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Legacy | 25 | 65 | 88.50% | 21.81 | 16,027 | 0.243 s | 194,061 |
-| Independent reference | 37 | 65 | 100% | 21.04 | 9,833 | 0.362 s | 181,798 |
-| New unmeasured plan | 39 | 65 | 100% | 20.95 | 11,410 | 0.398 s | 183,869 |
-| New plan, correct simulated FOV | 37 | 60 | 100% | 7.07 | 6,046 | 0.414 s | 213,058 |
+| Legacy | 25 | 65 | 88.50% | 21.81 | 16,027 | 0.242 s | 194,061 |
+| Independent reference | 37 | 65 | 100% | 21.04 | 9,833 | 0.379 s | 181,798 |
+| New unmeasured plan | 39 | 65 | 100% | 20.95 | 11,410 | 0.344 s | 183,869 |
+| New plan, correct simulated FOV | 39 | 60 | 100% | 7.06 | 5,969 | 0.343 s | 212,967 |
 
-The edge proxy is not a measured number of duplicated objects. Desktop timings are not phone CPU measurements. About 40 MB is an existing major-allocation estimate, not peak browser/GPU memory. This fixture lacks parallax and sensor errors and is easier than handheld photography.
+The edge proxy is not a measured number of duplicated objects. Desktop timings are not phone CPU measurements. About 40 MB is an existing major-allocation estimate, not peak browser/GPU memory. This fixture lacks parallax and sensor errors and is easier than handheld photography. The two new 39-photo rows use exactly the same source JPEGs and positions; only FOV metadata differs, isolating the geometry effect.
 
 Insufficient overlap is a plausible contributor to weak matching. More images alone do not fix incorrect projection, drift, translation or feather-blend ghosting. Actual sources still fail feature alignment after the fitted-FOV diagnostic. A genuine denser recapture of the same room and independent optical calibration are needed to establish real-room improvement. Full stitching/hardware acceptance remains open.
 
