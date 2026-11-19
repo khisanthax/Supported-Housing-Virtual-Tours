@@ -1,16 +1,17 @@
 import {basis,deviceBasis,coverage} from './math.js';
+import {planningOptions,transposeFOV,sideMeasurement,finishCalibration,withCalibration} from './calibration.js';
 import {capturePlan,targetLabel,projectTarget,StableTarget,cameraBasis} from './guidance.js';
 import {saveSession,findSession,listSessions,deleteSession} from './store.js';
 const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textContent=text;return n};
 const blobOf=canvas=>new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Camera photo could not be encoded.')),'image/jpeg',.95));
 const fresh=at=>performance.now()-at<350;
-const newSession=apartment=>({id:crypto.randomUUID(),apartment,revision:0,frames:[],hfov:65,aspect:4/3,targets:capturePlan(65,4/3),state:'capturing',updated:Date.now()});
+const newSession=apartment=>({id:crypto.randomUUID(),apartment,revision:0,frames:[],hfov:65,aspect:4/3,plannerVersion:2,targets:capturePlan(65,4/3,planningOptions(false)),state:'capturing',updated:Date.now()});
 
 export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=false}){
  if(!apartmentKey)throw Error('Select an apartment first.');
  if(!isSecureContext)throw Error('Camera capture requires HTTPS or localhost.');
  let session=await findSession(apartmentKey)??newSession(apartmentKey);
- let stream,worker,raw,current,lastMotion=0,viewer,previewURL,anchorURL,index=0,sensorMoved=false,previousRaw=null;
+ let fovSetup=null,stream,worker,raw,current,lastMotion=0,viewer,previewURL,anchorURL,index=0,sensorMoved=false,previousRaw=null;
  let closed=false,working=false,capturing=false,calibrated=false,needsAlign=!!session.frames.length,retaking=false,sensorsAllowed=false,sensorProblem='';
  const gate=new StableTarget();let displayAngle=screen.orientation?.angle??0,liveAspect=session.aspect,liveFov=session.hfov,startGeneration=0,starting=false;
  const fit=()=>{const box=$('stage').getBoundingClientRect(),width=Math.min(box.width,box.height*liveAspect),height=width/liveAspect;Object.assign(d.querySelector('.capture-overlay').style,{width:width+'px',height:height+'px'});return{width,height}};
@@ -23,7 +24,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
  <button id="capture-photo" disabled>Capture photo</button><p id="capture-count" role="status" aria-live="polite"></p>
  <details id="capture-map" open><summary>Coverage guide · select a dot to retake</summary><p id="capture-map-help">Top: ceiling. Middle: around the room. Bottom: floor. The highlighted dot is next; checked dots are saved. Front is where you started.</p><div class="capture-map-scroll"><div id="capture-targets" role="group" aria-label="Room coverage and retakes"></div></div></details>
  <div id="capture-recovery" hidden><img id="capture-anchor" alt="Starting photograph: line up the same scene to resume guidance"><p>Line up the camera with this saved photograph, then realign. If guidance has drifted, this restores its horizontal reference. Do not change lenses.</p><button id="capture-realign">Aligned with starting photo — resume</button></div>
- <p id="capture-message" role="status" aria-live="polite"></p>
+ <p id="capture-message" role="status" aria-live="polite"></p><p id="capture-camera-model"></p>
  <label>Viewpoint name<input id="capture-name" maxlength="80" value="Captured room"></label><label>Room group (optional)<input id="capture-group" maxlength="80"></label>
  <details id="capture-settings"><summary>Saved captures and panorama settings</summary><label>Saved capture session<select id="capture-sessions"></select></label>
  <label>Stitching engine<select id="capture-engine"><option value="baseline">Original sensor-only baseline</option><option value="features">Experimental OpenCV alignment (may reject difficult captures)</option></select></label><label>Output resolution<select id="capture-resolution"><option value="2048">2048 × 1024</option><option value="4096">4096 × 2048 (more memory and time)</option><option value="1024">1024 × 512 (diagnostic)</option></select></label>
@@ -44,12 +45,29 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
  control('reference','Realign',()=>$('recovery').scrollIntoView({block:'start'}));
  control('fullscreen','Fullscreen',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();else say('Fullscreen is unavailable; the full-window camera remains available.')}catch{say('Fullscreen was declined; the full-window camera remains available.')}fit()});
  control('exit','Exit',()=>$('close').click());d.prepend(toolbar);
+ const setupPanel=node('div');setupPanel.className='capture-calibration';setupPanel.id='capture-calibration';setupPanel.hidden=true;
+ const setupHelp=node('p');setupHelp.id='capture-calibration-help';setupHelp.setAttribute('role','status');
+ const setupStep=node('button');setupStep.id='capture-calibration-step';
+ const setupCancel=node('button','Cancel camera setup');setupCancel.id='capture-calibration-cancel';
+ setupPanel.append(setupHelp,setupStep,setupCancel);$('stage').append(setupPanel);
+ const setupMarker=node('span');setupMarker.className='capture-calibration-marker';setupMarker.hidden=true;setupMarker.setAttribute('aria-hidden','true');d.querySelector('.capture-overlay').append(setupMarker);
+ async function cameraBinding(){const settings=stream?.getVideoTracks()[0]?.getSettings()??{};const value=JSON.stringify([stream?.getVideoTracks()[0]?.label||settings.facingMode||'unknown-camera',Math.round(Math.min(liveAspect,1/liveAspect)*100),settings.zoom??1,settings.resizeMode??'']);return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),n=>n.toString(16).padStart(2,'0')).join('');}
+ control('calibrate','Camera setup',async()=>{if(session.frames.length){say('Saved captures keep their original camera settings. Start another capture to calibrate without changing them.');return}if(working||capturing)return;fovSetup={stage:'centre'};clearAim();if(!stream)await $('start').onclick();guidance();$('stage').scrollIntoView({block:'start'})});
+ setupCancel.onclick=()=>{fovSetup=null;clearAim();say('Camera setup canceled. Field of view remains an unverified estimate.');guidance()};
+ setupStep.onclick=async()=>{try{
+  if(!fovSetup||!stream||!raw||!fresh(lastMotion)||!sensorMoved||$('manual').checked)throw Error('Camera setup needs fresh motion readings. Move gently or cancel to use the visual manual guide.');
+  const pose=cameraBasis(raw,0,displayAngle);
+  if(fovSetup.stage==='centre'){if(Math.abs(pose.f[1])>.4)throw Error('Choose a distant detail near eye level.');fovSetup={stage:'left',reference:pose};}
+  else if(fovSetup.stage==='left'){fovSetup.left=sideMeasurement(fovSetup.reference,pose,-1);fovSetup.stage='right';}
+  else{const right=sideMeasurement(fovSetup.reference,pose,1),measurement=finishCalibration(fovSetup.left,right,liveAspect),next=withCalibration(session,measurement);next.cameraBinding=await cameraBinding();await saveSession(next);session=next;liveFov=measurement.hfov;fovSetup=null;index=0;calibrated=false;current=null;clearAim();say('Camera estimate saved for this capture. It depends on careful visual alignment and stable sensors; it is not certified lens calibration.');render();}
+  guidance();
+ }catch(e){say(e.message);setupHelp.textContent=e.message;}};
  const resize=()=>fit();addEventListener('resize',resize);
  const target=()=>session.targets[index],reference=()=>session.frames.find(f=>f.id===session.targets[0].id)??session.frames[0];
  const pending=()=>session.targets.findIndex(t=>!session.frames.some(f=>f.id===t.id));
  const eligible=()=>retaking||!session.frames.some(f=>f.id===target().id);
  function clearAim(){gate.reset();$('hold').value=0}
- function stopCamera(){startGeneration++;stream?.getTracks().forEach(t=>t.stop());stream=null;$('video').srcObject=null;current=null;calibrated=false;needsAlign=!!session.frames.length;clearAim();$('photo').disabled=true}
+ function stopCamera(){fovSetup=null;setupPanel.hidden=true;setupMarker.hidden=true;startGeneration++;stream?.getTracks().forEach(t=>t.stop());stream=null;$('video').srcObject=null;current=null;calibrated=false;needsAlign=!!session.frames.length;clearAim();$('photo').disabled=true}
  function stopWorker(){worker?.terminate();worker=null;working=false;$('stop').disabled=true}
  function disposePreview(){viewer?.destroy();viewer=null;if(previewURL)URL.revokeObjectURL(previewURL);previewURL=null;$('preview').replaceChildren()}
  function preview(){disposePreview();if(!session.output)return;previewURL=URL.createObjectURL(session.output);viewer=new Marzipano.Viewer($('preview'),{controls:{mouseViewMode:'drag'}});const view=new Marzipano.RectilinearView({yaw:0,pitch:0,fov:1.4},Marzipano.RectilinearView.limit.traditional(4096,2.1));viewer.createScene({source:Marzipano.ImageUrlSource.fromString(previewURL),geometry:new Marzipano.EquirectGeometry([{width:session.report.width}]),view,pinFirstLevel:true}).switchTo();viewer.updateSize();say('Preview: '+session.report.width+' × '+session.report.height+' · '+(session.output.size/1048576).toFixed(2)+' MiB · '+session.report.ms+' ms. Inspect every direction. '+(session.report.alignment?'Experimental alignment residual '+session.report.alignment.afterDegrees.toFixed(2)+' degrees (training matches); excluded frames: '+session.report.alignment.excludedUnmatchedFrames.join(',')+'. Inspect seams carefully.':'No feature alignment or exposure compensation was performed.')+'')}
@@ -59,18 +77,22 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
  function guidance(){
   if(closed)return;
   const manual=$('manual').checked,complete=pending()<0&&!retaking,active=!!stream&&!working&&!capturing&&!document.hidden;
-  const tracking=active&&!manual&&calibrated&&fresh(lastMotion)&&current&&!needsAlign;
+  const tracking=!fovSetup&&active&&!manual&&calibrated&&fresh(lastMotion)&&current&&!needsAlign;
   fit();const pos=tracking?projectTarget(target(),current,liveFov,liveAspect):{x:.5,y:.5,visible:true};
-  $('aim').style.left=pos.x*100+'%';$('aim').style.top=pos.y*100+'%';$('aim').hidden=complete||!stream||(!manual&&!tracking);
+  $('aim').style.left=pos.x*100+'%';$('aim').style.top=pos.y*100+'%';$('aim').hidden=!!fovSetup||complete||!stream||(!manual&&!tracking);
   $('aim').classList.toggle('aligned',!!tracking&&gate.state.aligned);$('aim').classList.toggle('offscreen',!pos.visible);
   $('turn').textContent=tracking&&!pos.visible?pos.hint:'';
   $('hold').value=tracking?gate.state.progress:0;
-  $('photo').hidden=!manual;$('photo').disabled=!active||!manual||!eligible();
+  $('photo').hidden=!manual;$('photo').disabled=!!fovSetup||!active||!manual||!eligible();
   $('recovery').hidden=!session.frames.length||!needsAlign;
   $('realign').disabled=!active||manual||!raw||!fresh(lastMotion)||!sensorMoved;
   $('resume').hidden=!!stream;$('pause').hidden=!stream;
+  setupPanel.hidden=!fovSetup;setupMarker.hidden=!fovSetup||!stream;
+  if(fovSetup){const step=fovSetup.stage;setupMarker.style.left=(step==='left'?15:step==='right'?85:50)+'%';setupHelp.textContent=step==='centre'?'Choose a small distant stationary detail near eye level. Keep the camera in one spot and put the detail at the centre crosshair.':step==='left'?'Turn around the lens until the SAME detail is inside the LEFT circle. Keep it at the same height.':'Turn back past the centre until the SAME detail is inside the RIGHT circle. Keep it at the same height.';setupStep.textContent=step==='centre'?'Detail centred':step==='left'?'Detail at left circle':'Detail at right circle — save estimate';setupStep.disabled=!active||!raw||!fresh(lastMotion)||!sensorMoved||manual;if(manual||!sensorsAllowed)setupHelp.textContent='Camera setup needs live motion guidance. Enable motion or cancel setup to use manual capture.';else if(!raw||!fresh(lastMotion)||!sensorMoved)setupHelp.textContent='Waiting for fresh motion readings. Move the phone gently; automatic photography stays paused.';}
+  $('calibrate').disabled=working||capturing||!!fovSetup;
   let hint=targetLabel(target())+'. ';
-  if(complete)hint='All photos captured. Create the panorama, or select a saved dot to retake.';
+  if(fovSetup)hint='Camera setup: automatic photography is paused. '+setupHelp.textContent;
+  else if(complete)hint='All photos captured. Create the panorama, or select a saved dot to retake.';
   else if(!stream)hint='Capture paused. Tap Resume Capture to reconnect the camera and motion guidance. Saved photos are kept.';
   else if(manual)hint+='Manual guide: aim at the highlighted overview dot, then press Capture photo. The centre circle does not track without sensors; positions are estimates.';
   else if(needsAlign)hint=!fresh(lastMotion)||!sensorMoved?'Waiting for live motion. Move the phone gently, then choose Realign to match the starting photo. Manual visual guide is available in Settings.':'Align with the starting photo below, then choose Resume. Automatic capture is paused.';
@@ -83,6 +105,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
  }
  function render(){
   for(const key of ['sessions','new','delete','start','sensors','synthetic','manual'])if($(key))$(key).disabled=working||capturing;
+  $('camera-model').textContent=(session.cameraCalibration?'Camera coverage uses a visual/sensor estimate for this capture. ':'Camera coverage is an unverified estimate. ')+(session.plannerVersion===2?'New plan uses extra overlap and a margin for uncertainty.':'Existing capture keeps its saved plan. Start another capture to use the new overlap plan.');
   const got=new Set(session.frames.map(f=>f.id));$('count').textContent=got.size+' of '+session.targets.length+' photos captured. Select a checked dot to retake it.';
   $('targets').replaceChildren();session.targets.forEach((t,i)=>{const done=got.has(t.id),b=node('button',done?'✓':'');b.type='button';b.className='capture-dot'+(done?' completed':'');b.style.left=(8+84*(t.yaw/(2*Math.PI)))+'%';b.style.top=(50-t.pitch/Math.PI*80)+'%';b.setAttribute('aria-label',(done?'Retake':'Aim at')+' photo '+(i+1)+': '+targetLabel(t));b.setAttribute('aria-pressed',String(i===index));b.disabled=working||capturing;b.onclick=()=>{index=i;retaking=done;clearAim();say(done?'Retake selected. Aim at its circle; the existing photo stays until its replacement is saved.':'Follow the highlighted target.');render()};$('targets').append(b)});
   $('stitch').disabled=working||capturing||session.frames.length<2;$('use').disabled=!session.output||!$('approved').checked||working||capturing;guidance();
@@ -104,7 +127,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
     const inside=projected.visible&&Math.hypot((projected.x-.5)*box.width,(projected.y-.5)*box.height)<=23;
     const state=gate.observe(current,target(),lastMotion,eligible()&&!capturing,inside);
     if(state.jump){needsAlign=true;calibrated=false;clearAim();say('Motion reference changed suddenly. Realign with the starting photo before continuing.');if(!session.frames.length)needsAlign=false;}
-    else if(state.ready&&eligible()&&!capturing&&!closed)takePhoto(true).catch(error=>say(error.message));
+    else if(!fovSetup&&state.ready&&eligible()&&!capturing&&!closed)takePhoto(true).catch(error=>say(error.message));
    }
    guidance();
   }catch{clearAim()}
@@ -116,7 +139,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
   }catch(e){sensorsAllowed=false;sensorProblem=e.message;current=null;clearAim();say(e.message)}
  }
  async function takePhoto(automatic=false){
-  if(capturing||working||closed||!stream||document.hidden||!eligible())return;
+  if(fovSetup||capturing||working||closed||!stream||document.hidden||!eligible())return;
   if(automatic){if(needsAlign||!calibrated||!fresh(lastMotion)||$('manual').checked||!gate.consume())return}
   else if(!$('manual').checked)return;
   capturing=true;render();say('Saving camera photo…');
@@ -132,7 +155,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
   }catch(e){stopCamera();say(e.message+' Automatic capture paused; saved photos were kept.')}
   finally{capturing=false;if(!closed)render()}
  }
- const exportSources=node('button','Export original captures (local ZIP)');exportSources.id='capture-export-sources';exportSources.onclick=async()=>{try{if(capturing||working)throw Error('Pause processing before exporting sources.');if(!session.frames.length)throw Error('No source photographs yet.');if(!confirm('Save an unencrypted source ZIP on this device? It includes original photographs and pose metadata. Keep it private.'))return;const {zipSync}=await import('/dist/vendor/backup-crypto.js'),files={},metadata={version:1,hfov:session.hfov,aspect:session.aspect,targets:session.targets,frames:[]};for(let i=0;i<session.frames.length;i++){const f=session.frames[i],name='frame-'+String(i+1).padStart(2,'0')+'.jpg';files[name]=new Uint8Array(await f.blob.arrayBuffer());const {blob,...fields}=f;metadata.frames.push({...fields,file:name})}files['capture.json']=new TextEncoder().encode(JSON.stringify(metadata));const url=URL.createObjectURL(new Blob([zipSync(files,{level:0})],{type:'application/zip'})),a=node('a');a.href=url;a.download='LevelTwo360-capture-sources.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);say('Sources exported locally. No photographs were uploaded.')}catch(e){say(e.message)}};$('settings').append(exportSources);
+ const exportSources=node('button','Export original captures (local ZIP)');exportSources.id='capture-export-sources';exportSources.onclick=async()=>{try{if(capturing||working)throw Error('Pause processing before exporting sources.');if(!session.frames.length)throw Error('No source photographs yet.');if(!confirm('Save an unencrypted source ZIP on this device? It includes original photographs and pose metadata. Keep it private.'))return;const {zipSync}=await import('/dist/vendor/backup-crypto.js'),files={},metadata={version:1,plannerVersion:session.plannerVersion,cameraCalibration:session.cameraCalibration,hfov:session.hfov,aspect:session.aspect,targets:session.targets,frames:[]};for(let i=0;i<session.frames.length;i++){const f=session.frames[i],name='frame-'+String(i+1).padStart(2,'0')+'.jpg';files[name]=new Uint8Array(await f.blob.arrayBuffer());const {blob,...fields}=f;metadata.frames.push({...fields,file:name})}files['capture.json']=new TextEncoder().encode(JSON.stringify(metadata));const url=URL.createObjectURL(new Blob([zipSync(files,{level:0})],{type:'application/zip'})),a=node('a');a.href=url;a.download='LevelTwo360-capture-sources.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);say('Sources exported locally. No photographs were uploaded.')}catch(e){say(e.message)}};$('settings').append(exportSources);
  $('photo').onclick=()=>takePhoto(false);
  $('sensors').onclick=enableSensors;
  $('manual').onchange=()=>{clearAim();current=null;calibrated=false;needsAlign=!!session.frames.length;guidance()};
@@ -140,14 +163,17 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
  $('start').onclick=async()=>{
   if(starting)return;starting=true;try{
    if(working||capturing)return;if(!navigator.mediaDevices?.getUserMedia)throw Error('This browser has no camera API.');displayAngle=screen.orientation?.angle??0;
-   if(!$('manual').checked)await enableSensors();if(closed)return;stopCamera();lastMotion=0;raw=null;previousRaw=null;sensorMoved=false;removeEventListener('deviceorientation',motion);addEventListener('deviceorientation',motion);
+   if(!$('manual').checked)await enableSensors();if(closed)return;const resumeSetup=fovSetup;stopCamera();fovSetup=resumeSetup;lastMotion=0;raw=null;previousRaw=null;sensorMoved=false;removeEventListener('deviceorientation',motion);addEventListener('deviceorientation',motion);
    const attempt=++startGeneration,acquired=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}}});if(closed||attempt!==startGeneration){acquired.getTracks().forEach(t=>t.stop());return}stream=acquired;
    $('video').srcObject=stream;await $('video').play();if(closed){stopCamera();return}
    const aspect=$('video').videoWidth/$('video').videoHeight;
-   liveAspect=aspect;liveFov=session.hfov;if(session.frames.length&&Math.abs(aspect-session.aspect)>.02){if(Math.abs(aspect-1/session.aspect)>.03)throw Error('Camera framing changed. Restore the same lens/framing, then Resume Capture; all photos are kept.');liveFov=2*Math.atan(Math.tan(session.hfov*Math.PI/360)/session.aspect)*180/Math.PI;}
-   if(!session.frames.length){session.aspect=aspect;session.targets=capturePlan(session.hfov,aspect);index=0;delete session.heading;await saveSession(session)}
+   liveAspect=aspect;liveFov=session.hfov;if(session.frames.length&&Math.abs(aspect-session.aspect)>.02){if(Math.abs(aspect-1/session.aspect)>.03)throw Error('Camera framing changed. Restore the same lens/framing, then Resume Capture; all photos are kept.');liveFov=transposeFOV(session.hfov,session.aspect);}
+   if(session.cameraBinding&&session.cameraBinding!==await cameraBinding())throw Error('Camera lens, zoom or framing changed. Start another capture for camera setup; existing photos are kept.');
+   if(!session.frames.length&&!session.cameraCalibration){session.aspect=aspect;session.targets=capturePlan(session.hfov,aspect,session.plannerVersion===2?planningOptions(false):undefined);index=0;delete session.heading;await saveSession(session)}
+   if(!session.frames.length&&session.cameraCalibration&&Math.abs(aspect-session.aspect)>.02){if(Math.abs(aspect-1/session.aspect)>.03)throw Error('Camera framing changed. Start another capture to estimate it again.');liveFov=transposeFOV(session.hfov,session.aspect);}
+   if(liveFov<35||liveFov>100)throw Error('This camera framing is outside the prototype range. Use the standard rear lens and start another capture; saved photos are kept.');
    fit();stream.getVideoTracks().forEach(track=>track.addEventListener('ended',()=>{if(stream?.getTracks().includes(track)){stopCamera();say('Camera interrupted. Tap Resume Capture; saved photos are kept.');guidance()}}));
-   say('Camera active. Rotate around the lens and follow the empty circle. Photos stay on this device.');render();$('stage').scrollIntoView({block:'start'});
+   say((session.cameraCalibration?'Camera uses a visual/sensor field-of-view estimate. ':'Camera field of view is unverified; Camera setup can estimate it before the first photo. ')+ 'Camera active. Rotate around the lens and follow the empty circle. Photos stay on this device.');render();$('stage').scrollIntoView({block:'start'});
   }catch(e){stopCamera();say(e.name==='NotAllowedError'?'Camera permission was denied. Allow camera access in browser settings; existing photos are kept.':e.message)}finally{starting=false;if(!closed)guidance()}
  };
  $('sessions').onchange=async()=>{try{stopCamera();stopWorker();disposePreview();const found=(await listSessions(apartmentKey)).find(r=>r.id===$('sessions').value);if(!found)throw Error('Capture no longer exists.');session=found;needsAlign=!!session.frames.length;fields();$('approved').checked=false;if(session.output)preview();render()}catch(e){say(e.message)}};
@@ -161,7 +187,7 @@ export async function captureRoom({apartmentKey,localOnly=true,syntheticBench=fa
   worker=new Worker(new URL('./stitch-worker.js',import.meta.url),{type:'module'});worker.onerror=()=>{stopWorker();say('Stitch worker failed; source photos were kept. Retry after checking browser support.');render()};
   worker.onmessage=async({data})=>{if(data.type==='alignment-progress')say(data.stage==='features'?'Finding image details: '+data.done+' of '+data.total+' photos.':data.stage==='matching'?'Checking overlapping photographs: '+data.done+' of '+data.total+'.':'Refining camera alignment locally…');else if(data.type==='progress')$('progress').value=data.done;else if(data.type==='error'){$('stitch-details').hidden=!data.diagnostics;$('stitch-diagnostic').textContent=data.diagnostics?JSON.stringify(data.diagnostics,null,2):'';stopWorker();$('approved').checked=false;say(data.message+(session.output?' Previous completed panorama remains; no experimental result was created.':''));render()}else if(data.type==='result'){
    stopWorker();const next={...session,output:data.blob,report:data.report,state:'preview',name:$('name').value.trim(),group:$('group').value.trim()};try{await saveSession(next);session=next;if(closed)return;$('approved').checked=false;preview();render()}catch(e){say(e.message);render()}
-  }};worker.postMessage({engine:$('engine').value,frames:session.frames,width:Number($('resolution').value),quality:Number($('quality').value)});
+  }};worker.postMessage({plannerVersion:session.plannerVersion,engine:$('engine').value,frames:session.frames,width:Number($('resolution').value),quality:Number($('quality').value)});
  }catch(e){stopWorker();say(e.message);render()}};
  $('stop').onclick=()=>{stopWorker();render();say('Stitching canceled. Source photos and any previous complete preview were kept.')};$('approved').onchange=render;
  if(syntheticBench){const b=node('button','Load synthetic test captures (no camera)');b.id='capture-synthetic';b.onclick=async()=>{try{if(session.frames.length&&!confirm('Replace only this capture session with synthetic test frames? Saved apartments stay unchanged.'))return;stopCamera();stopWorker();b.disabled=true;say('Generating synthetic test photographs locally…');const {syntheticFrames}=await import('./synthetic.js'),data=await syntheticFrames();const next={...session,...data,state:'capturing',output:null,report:null};await saveSession(next);session=next;index=0;updateReference();disposePreview();render();say('Synthetic frames saved locally. Create the panorama to test the pipeline.')}catch(e){say(e.message)}finally{b.disabled=false}};d.insertBefore(b,$('stage'))}

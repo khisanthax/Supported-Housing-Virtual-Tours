@@ -16,6 +16,8 @@ jobs:
       - run: node capture/test-backup-browser.mjs
       - run: node capture/recovery-browser-test.mjs
       - run: node capture/quality-test.mjs
+      - run: node capture/calibration-browser-test.mjs
+      - run: node capture/fov-test.mjs
       - run: node capture/guidance-browser-test.mjs
       - run: node capture/browser-test.mjs
   test:

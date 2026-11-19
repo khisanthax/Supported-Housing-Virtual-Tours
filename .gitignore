@@ -27,3 +27,5 @@ cloudflare/cloudflare/
 local/generated/
 
 capture/generated/
+
+__pycache__/

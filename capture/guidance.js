@@ -10,11 +10,11 @@ export function cameraBasis(reading,heading=0,screenAngle=0){
   return{f:p.f,r:p.r.map((v,i)=>v*c-p.u[i]*s),u:p.u.map((v,i)=>p.r[i]*s+v*c)};
 }
 
-export function capturePlan(hfov,aspect){
-  const targets=plan(hfov,aspect);
+export function capturePlan(hfov,aspect,options){
+  const targets=plan(hfov,aspect,options);
   // Begin level and facing forward, then sweep each row, including both poles.
   if(!targets.some(t=>Math.abs(t.pitch)<.001))targets.push({id:'target-start',yaw:0,pitch:0});
-  if(targets.length>64)throw Error('This camera needs too many photographs. Use the standard rear lens.');
+  if(targets.length>(options?.maxFrames??64))throw Error('This camera needs too many photographs. Use the standard rear lens.');
   const order=p=>Math.abs(p)<.001?0:p>0?Math.abs(p):Math.PI+Math.abs(p);
   return targets.sort((a,b)=>order(a.pitch)-order(b.pitch)||a.yaw-b.yaw);
 }

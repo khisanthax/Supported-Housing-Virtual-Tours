@@ -2,7 +2,7 @@ import{checkFrame}from'./math.js';
 self.onmessage=async({data})=>{
  let sums,weights,rgba;const start=performance.now();
  try{
-  let {frames,width=2048,quality=.92}=data;let alignment=null;const improved=['features','features-ownership'].includes(data.engine),singleSource=data.engine==='features-ownership';if(![1024,2048,4096].includes(width)||!Number.isFinite(quality)||quality<.7||quality>.98||!Array.isArray(frames)||frames.length<2||frames.length>64)throw Error('Invalid stitch settings.');
+  let {frames,width=2048,quality=.92}=data;let alignment=null;const improved=['features','features-ownership'].includes(data.engine),singleSource=data.engine==='features-ownership';if(![1024,2048,4096].includes(width)||!Number.isFinite(quality)||quality<.7||quality>.98||!Array.isArray(frames)||frames.length<2||frames.length>(data.plannerVersion===2?96:64))throw Error('Invalid stitch settings.');
   if(frames.reduce((n,f)=>n+(f.blob?.size??0),0)>64*1024*1024)throw Error('Capture source size exceeds the local processing limit.');
   for(const f of frames){checkFrame(f);if(!(f.blob instanceof Blob)||f.blob.size>4*1024*1024)throw Error('Invalid capture frame.');}
   if(improved){const {alignFrames}=await import('./feature-align.js');const result=await alignFrames(frames,p=>self.postMessage({type:'alignment-progress',...p}));frames=result.frames;alignment=result.report;}
