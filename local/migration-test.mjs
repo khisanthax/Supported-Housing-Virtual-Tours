@@ -83,7 +83,7 @@ const env = {
         const path = new URL(request.url).pathname;
         let data;
         if(captureTest&&path.startsWith('/staff/editor/capture/')){
-          const module=path.slice('/staff/editor/capture/'.length),allowed=new Set(['ui.js','math.js','guidance.js','calibration.js','store.js','projection.js','stitch-quality.js','alignment.js','feature-align.js','stitch-worker.js','synthetic.js','indoor-fixture.js','style.css']);
+          const module=path.slice('/staff/editor/capture/'.length),allowed=new Set(['ui.js','math.js','guidance.js','calibration.js','store.js','projection.js','stitch-quality.js','alignment.js','feature-align.js','pose-overlap.js','stitch-worker.js','synthetic.js','indoor-fixture.js','style.css']);
           if(module==='vendor/opencv.js')data=Buffer.from('// UMD receiver adapted for module workers.\n'+(await readFile(new URL('../node_modules/@techstark/opencv-js/dist/opencv.js',import.meta.url),'utf8')).replace('}(this, function','}(globalThis, function'));
           else if(allowed.has(module))data=await readFile(new URL('../capture/'+module,import.meta.url));
           else return new Response('Not found',{status:404});

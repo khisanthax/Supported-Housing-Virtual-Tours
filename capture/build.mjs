@@ -7,7 +7,7 @@ const source=new URL('../local/generated/',import.meta.url),out=new URL('./gener
 const manifest=JSON.parse(await readFile(new URL('assets.json',source)));
 const files=new Map();
 for(const path of manifest.files)if(path!=='/sw.js')files.set(path,await readFile(new URL('.'+path,source)));
-for(const name of ['math.js','projection.js','stitch-quality.js','calibration.js','alignment.js','feature-align.js','indoor-fixture.js','guidance.js','store.js','ui.js','style.css','stitch-worker.js','synthetic.js'])files.set('/capture/'+name,await readFile(new URL(name,import.meta.url)));
+for(const name of ['math.js','projection.js','stitch-quality.js','calibration.js','alignment.js','feature-align.js','pose-overlap.js','indoor-fixture.js','guidance.js','store.js','ui.js','style.css','stitch-worker.js','synthetic.js'])files.set('/capture/'+name,await readFile(new URL(name,import.meta.url)));
 const cvSource=await readFile(new URL('../node_modules/@techstark/opencv-js/dist/opencv.js',import.meta.url),'utf8');
 files.set('/capture/vendor/opencv.js',Buffer.from('// UMD global receiver adapted for ES module workers; upstream algorithm unchanged.\n'+cvSource.replace('}(this, function','}(globalThis, function')));
 files.set('/capture/vendor/OpenCV-LICENSE.txt',await readFile(new URL('../node_modules/@techstark/opencv-js/LICENSE',import.meta.url)));

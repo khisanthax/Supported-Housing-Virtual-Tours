@@ -1,5 +1,7 @@
 # Isolated Capture Room experiment
 
+The experimental matcher retries unconnected views using the recorded camera directions. It warps overlapping views into a common image plane and checks distinctive image patches in both directions. A patch must match uniquely, agree on the return search and survive geometric checks. The existing full-tour quality checks still apply. See [the 38-photo replay](POSE-OVERLAP.md).
+
 Room capture skips the straight-down photograph. Follow the lower row as usual. Newly stitched panoramas have a gray area covering the bottom 20 degrees. Feet visible farther from the camera can still appear. Retrying an older session excludes its straight-down target. Export original captures to keep every saved JPEG, including any previously photographed floor. Earlier saved previews keep their original pixels until you stitch again.
 
 Current roll/quality revision: [findings, comparisons and physical checklist](ROLL-STREAKS.md). OpenCV is the default candidate engine; sensor-only rendering is diagnostic and cannot be accepted into a tour. New live level/reference bars block wrong roll, including ceiling/floor targets. Every source must participate, image-space alignment and overlap checks must pass, and visual review remains required. Previous/legacy previews are preserved but clearly labelled; failed attempts do not produce a newly approved panorama. Keep original source ZIPs. Production capture remains disabled; do not merge until the owner confirms acceptable Fold 7 results.
