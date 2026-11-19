@@ -107,10 +107,19 @@ The angular columns use different fitting/test subsets and are not a direct inde
 
 No synthetic result establishes Fold 7 photographic acceptance.
 
+## Worker policy and Cloud emulator verification
+
+OpenCV in this pinned build generates JavaScript bindings at runtime. The prior isolated HTTPS stitch-worker response had **no CSP**, even though the parent document had one. Workers do not acquire that document policy automatically. The revision applies an explicit policy only to the stitching worker: trusted same-origin script imports and binding/WASM execution are allowed, network connections are denied, and nested workers are denied. Parent and production staff-document policies are not relaxed.
+
+`capture/security-headers.mjs` defines the isolated worker policy; the loopback server and capture-only Cloud emulator share it. Isolated HTTPS staging must apply its header block to `/capture/stitch-worker.js`. The capture service-worker version includes the policy so cached workers refresh with the headers. No production capture or policy change is activated.
+
+A browser probe verifies both required execution modes and verifies same-origin/external fetches are blocked **before reaching the network**. It uses no photos or credentials. CI also found that the existing Cloud capture emulator did not serve the nested OpenCV vendor bundle; fixed that test-only allowlist and scoped policy, then verified one qualified JPEG upload after approval, exact private revision persistence and anonymous denial against in-memory D1/KV. No live Cloud data is involved.
+
 ## Reproduce and remaining physical gate
 
 - `npm test`: full regression suite, including full-axis gating, poles, transforms, monotonic projection, inverse roundtrips, borders and quality-contract rejection.
 - `node capture/roll-browser-test.mjs`: fake camera/sensors, steady wrong roll, correct capture, retake, pole references, landscape resume, metadata snapshot and saved frames.
+- `node capture/worker-policy-browser-test.mjs`: worker binding/WASM execution and network-denial probe.
 - Existing recovery/calibration/guidance/browser scripts: complete capture mechanics, permission failures, restart/offline, qualified candidate-to-editor and backup byte parity. Fake-camera sweeps explicitly permit safe rejection and never call fake images approved photographic output.
 - `node capture/streak-test.mjs`: paired old/current local comparison; requires the before commit in local Git history. `CAPTURE_STREAK_CONTROLLED=1` selects the same perturbed 28-photo fixture. `CAPTURE_STREAK_PROJECTION_ONLY=1` skips expensive feature fitting.
 - Optional private `STITCH_SOURCE` adapter: real source data is passed locally to the loopback browser, never served/uploaded. Real-image output is refused inside the repository.
