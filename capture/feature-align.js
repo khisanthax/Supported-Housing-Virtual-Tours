@@ -3,11 +3,11 @@ import {cameraRay,refineRotations,connectedFrames} from './alignment.js';
 export async function alignFrames(frames,progress=()=>{}){
  await import('./vendor/opencv.js');const cv=globalThis.cv;
  if(!cv?.Mat)await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('OpenCV initialization timed out. Sources kept.')),30000);cv.onRuntimeInitialized=()=>{clearTimeout(timer);resolve()}});
- const features=[];let edges=[];let orb,matcher;
+ const features=[];let edges=[];const diagnosticPairs=[];let orb,matcher;
  try{
-  orb=new cv.AKAZE();orb.setThreshold(.004);matcher=new cv.BFMatcher(cv.NORM_HAMMING,false);
+  orb=new cv.AKAZE();orb.setThreshold(.001);matcher=new cv.BFMatcher(cv.NORM_HAMMING,false);
   for(let i=0;i<frames.length;i++){
-   const bitmap=await createImageBitmap(frames[i].blob),scale=Math.min(1,640/Math.max(bitmap.width,bitmap.height)),w=Math.round(bitmap.width*scale),h=Math.round(bitmap.height*scale),canvas=new OffscreenCanvas(w,h),ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,w,h);bitmap.close();
+   const bitmap=await createImageBitmap(frames[i].blob),scale=Math.min(1,800/Math.max(bitmap.width,bitmap.height)),w=Math.round(bitmap.width*scale),h=Math.round(bitmap.height*scale),canvas=new OffscreenCanvas(w,h),ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,w,h);bitmap.close();
    const pixels=ctx.getImageData(0,0,w,h),src=cv.matFromImageData(pixels),gray=new cv.Mat(),mask=new cv.Mat(),kp=new cv.KeyPointVector(),desc=new cv.Mat();
    try{cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.equalizeHist(gray,gray);orb.detectAndCompute(gray,mask,kp,desc);const points=[],light=[];for(let j=0;j<kp.size();j++){const p=kp.get(j).pt;points.push([2*p.x/(w-1)-1,1-2*p.y/(h-1)]);const at=(Math.round(p.y)*w+Math.round(p.x))*4;light.push((pixels.data[at]+pixels.data[at+1]+pixels.data[at+2])/3)}features.push({points,light,desc,w,h})}catch(e){desc.delete();throw e}finally{src.delete();gray.delete();mask.delete();kp.delete();canvas.width=canvas.height=1}
    progress({stage:'features',done:i+1,total:frames.length});
@@ -16,7 +16,7 @@ export async function alignFrames(frames,progress=()=>{}){
    if(dot(frames[i].pose.f,frames[j].pose.f)<.05)continue; // Bounded nearby pairs; reject invalid legacy pose conventions.
 
    const a=features[i],b=features[j];if(a.desc.rows<12||b.desc.rows<12)continue;
-   const knn=new cv.DMatchVectorVector(),candidate=[];
+   progress({stage:'matching',done:i+1,total:frames.length});const knn=new cv.DMatchVectorVector(),candidate=[];
    try{matcher.knnMatch(a.desc,b.desc,knn,2);for(let k=0;k<knn.size();k++){const row=knn.get(k);try{if(row.size()<2)continue;const m=row.get(0),n=row.get(1);if(m.distance<.72*n.distance)candidate.push(m)}finally{row.delete()}}}finally{knn.delete()}
    if(candidate.length<12)continue;
    let from,to,H,mask;try{
@@ -25,11 +25,12 @@ export async function alignFrames(frames,progress=()=>{}){
     mask=new cv.Mat();H=cv.findHomography(from,to,cv.RANSAC,2.5,mask);if(H.empty())continue;
     const matches=candidate.filter((m,k)=>mask.data[k]).slice(0,100).map(m=>({a:a.points[m.queryIdx],b:b.points[m.trainIdx],gain:Math.log(Math.max(15,a.light[m.queryIdx])/Math.max(15,b.light[m.trainIdx]))}));
     const priorErrors=matches.map(m=>{const ray=(p,f)=>{const v=cameraRay(p,f);return v.map((_,k)=>f.pose.r[k]*v[0]+f.pose.u[k]*v[1]+f.pose.f[k]*v[2])};return Math.acos(Math.max(-1,Math.min(1,dot(ray(m.a,frames[i]),ray(m.b,frames[j])))))}).sort((a,b)=>a-b);
+    if(matches.length>=12&&matches.length/candidate.length>.35)diagnosticPairs.push({i,j,prior:priorErrors[Math.floor(priorErrors.length/2)]*180/Math.PI});
     if(matches.length>=12&&matches.length/candidate.length>.35&&priorErrors[Math.floor(priorErrors.length/2)]<.18)edges.push({i,j,matches});
    }finally{from?.delete();to?.delete();H?.delete();mask?.delete()}
   }
   const retained=frames.map((f,i)=>i).filter(i=>edges.some(e=>e.i===i||e.j===i)),excluded=frames.filter((f,i)=>!retained.includes(i)).map(f=>f.id);
-  if(retained.length<frames.length*.8)throw Error('Too many photographs lack reliable feature matches. Sources retained.');
+  if(retained.length<frames.length*.8){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. This is a limitation of the experimental matcher; no panorama was created.');error.diagnostics={keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,ransacPairs:diagnosticPairs};throw error;}
   const index=new Map(retained.map((old,i)=>[old,i]));edges=edges.map(e=>({...e,i:index.get(e.i),j:index.get(e.j)}));frames=retained.map(i=>frames[i]);
   if(!connectedFrames(frames.length,edges))throw Error('Feature graph has disconnected components: '+edges.map(e=>frames[e.i].id+'-'+frames[e.j].id).join(' ')+' Sources retained; no guessed alignment.');
   let best;for(const scale of [.45,.55,.65,.75,.85,.95,1,1.1,1.2]){const r=refineRotations(frames,edges,{scale});if(!best||r.after<best.after)best={...r,scale,k1:0};progress({stage:'alignment',scale,error:r.after})}

@@ -25,5 +25,5 @@ self.onmessage=async({data})=>{
   const report={alignment,composition:singleSource?'single-source ownership (diagnostic; no graph-cut seam)':improved?'refined feather (no optimized seam)':'feather baseline',width,height,bytes:blob.size,quality,frames:frames.length,missing,ms:Math.round(performance.now()-start),estimatedWorkingBytes:n*(12+4+4)+1920*1920*8};
   if(blob.size>4*1024*1024)throw Error('Panorama is '+(blob.size/1048576).toFixed(2)+' MiB, over the existing 4 MiB limit. Explicitly choose a different resolution/quality and retry; no automatic quality reduction occurred.');
   self.postMessage({type:'result',blob,report});
- }catch(error){self.postMessage({type:'error',message:error.message})}finally{sums=weights=rgba=null;self.close()}
+ }catch(error){self.postMessage({type:'error',message:error.message,diagnostics:error.diagnostics})}finally{sums=weights=rgba=null;self.close()}
 };
