@@ -23,14 +23,16 @@ export async function alignFrames(frames,progress=()=>{}){
     from=cv.matFromArray(candidate.length,1,cv.CV_32FC2,candidate.flatMap(m=>[...a.points[m.queryIdx]].map((v,k)=>(k===0?v+1:1-v)*(k===0?a.w:a.h)/2)));
     to=cv.matFromArray(candidate.length,1,cv.CV_32FC2,candidate.flatMap(m=>[...b.points[m.trainIdx]].map((v,k)=>(k===0?v+1:1-v)*(k===0?b.w:b.h)/2)));
     mask=new cv.Mat();H=cv.findHomography(from,to,cv.RANSAC,2.5,mask);if(H.empty())continue;
-    const matches=candidate.filter((m,k)=>mask.data[k]).slice(0,100).map(m=>({a:a.points[m.queryIdx],b:b.points[m.trainIdx],gain:Math.log(Math.max(15,a.light[m.queryIdx])/Math.max(15,b.light[m.trainIdx]))}));
+    const inliers=candidate.filter((m,k)=>mask.data[k]);
+    if(inliers.length<12||inliers.length/candidate.length<=.35)continue;
+    const matches=inliers.slice(0,100).map(m=>({a:a.points[m.queryIdx],b:b.points[m.trainIdx],gain:Math.log(Math.max(15,a.light[m.queryIdx])/Math.max(15,b.light[m.trainIdx]))}));
     const priorErrors=matches.map(m=>{const ray=(p,f)=>{const v=cameraRay(p,f);return v.map((_,k)=>f.pose.r[k]*v[0]+f.pose.u[k]*v[1]+f.pose.f[k]*v[2])};return Math.acos(Math.max(-1,Math.min(1,dot(ray(m.a,frames[i]),ray(m.b,frames[j])))))}).sort((a,b)=>a-b);
-    if(matches.length>=12&&matches.length/candidate.length>.35)diagnosticPairs.push({i,j,prior:priorErrors[Math.floor(priorErrors.length/2)]*180/Math.PI});
-    if(matches.length>=12&&matches.length/candidate.length>.35&&priorErrors[Math.floor(priorErrors.length/2)]<.18)edges.push({i,j,matches});
+    diagnosticPairs.push({i,j,prior:priorErrors[Math.floor(priorErrors.length/2)]*180/Math.PI});
+    if(priorErrors[Math.floor(priorErrors.length/2)]<.18)edges.push({i,j,matches});
    }finally{from?.delete();to?.delete();H?.delete();mask?.delete()}
   }
   const retained=frames.map((f,i)=>i).filter(i=>edges.some(e=>e.i===i||e.j===i)),excluded=frames.filter((f,i)=>!retained.includes(i)).map(f=>f.id);
-  if(retained.length!==frames.length){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. This is a limitation of the experimental matcher; no panorama was created. Every source photo must participate; no photos were dropped.');error.diagnostics={keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,missingMatchedSourceIds:excluded,coverage:"not rendered: incomplete match graph",ransacPairs:diagnosticPairs};throw error;}
+  if(retained.length!==frames.length){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. Check source photos '+frames.flatMap((f,i)=>excluded.includes(f.id)?[i+1]:[]).join(', ')+'. The matcher could not verify their overlap. Every source photo must participate; no photos were dropped.');error.diagnostics={keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,missingMatchedSourceIds:excluded,coverage:"not rendered: incomplete match graph",ransacPairs:diagnosticPairs};throw error;}
   if(!connectedFrames(frames.length,edges))throw Error('Feature graph has disconnected components: '+edges.map(e=>frames[e.i].id+'-'+frames[e.j].id).join(' ')+' Sources retained; no guessed alignment.');
   // Deterministic held-out feature correspondences; not independent scene ground truth.
   const training=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5>1)})),heldout=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5===1)}));
