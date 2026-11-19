@@ -21,7 +21,7 @@ export function capturePlan(hfov,aspect,options){
 
 export function targetLabel(target){
   if(target.pitch>1.3)return 'Ceiling — point straight up';
-  if(target.pitch< -1.3)return 'Floor — point straight down';
+  if(target.pitch<= -Math.PI/2+1e-6)return 'Floor — point straight down';
   const row=Math.abs(target.pitch)<.15?'Middle row':target.pitch>0?'Upper row':'Lower row';
   const names=['front','front right','right','back right','back','back left','left','front left'];
   const i=Math.round(((target.yaw%(Math.PI*2)+Math.PI*2)%(Math.PI*2))/(Math.PI/4))%8;

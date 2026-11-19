@@ -1,5 +1,5 @@
 // Device-independent visual/sensor estimate; not certified lens or distortion calibration.
-import {basis,checkFrame,dot,deg,rad} from './math.js';
+import {basis,checkFrame,dot,deg,rad,roomTargets} from './math.js';
 import {capturePlan} from './guidance.js';
 // Visual estimates are not certified intrinsics; retain the safety margin after setup.
 export const planningOptions=()=>({overlap:.4,fovScale:.85,maxFrames:96});
@@ -23,5 +23,5 @@ export function finishCalibration(left,right,aspect){
 export function withCalibration(session,measurement){
  if(session.frames.length)throw Error('Saved photographs keep their original calibration and targets. Start another capture to calibrate this camera.');
  const {hfov,aspect}=measurement;checkFrame({hfov,aspect,pose:basis(0,0)});
- return{...session,hfov,aspect,plannerVersion:2,cameraCalibration:measurement,targets:capturePlan(hfov,aspect,planningOptions()),output:null,report:null};
+ return{...session,hfov,aspect,plannerVersion:2,cameraCalibration:measurement,targets:roomTargets(capturePlan(hfov,aspect,planningOptions())),output:null,report:null};
 }

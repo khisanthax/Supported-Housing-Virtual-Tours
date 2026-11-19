@@ -15,7 +15,7 @@ test('visual camera estimate measures different camera FOVs and reciprocal orien
  assert.throws(()=>finishCalibration(45,75,.75),/disagree/);assert.throws(()=>finishCalibration(NaN,65,.75),/Complete/);
 });
 test('new adaptive plans add overlap and tolerate moderate FOV uncertainty across camera shapes',()=>{
- const old=capturePlan(65,.75);assert.equal(old.length,25);const measured65=withCalibration({frames:[]},finishCalibration(65,65,.75));assert.equal(measured65.targets.length,39,'Visual setup must retain uncertainty margin; do not regress to a sparse 26-frame plan');
+ const old=capturePlan(65,.75);assert.equal(old.length,25);const measured65=withCalibration({frames:[]},finishCalibration(65,65,.75));assert.equal(measured65.targets.length,38,'Visual setup must retain uncertainty margin; do not regress to a sparse 26-frame plan');
  for(const aspect of[.75,1,4/3,16/9]){
   const targets=capturePlan(65,aspect,planningOptions());assert.ok(targets.length<=96);assert.ok(targets.length>capturePlan(65,aspect).length);
   const stats=overlapStats(targets.map(t=>({hfov:60,aspect,pose:basis(t.yaw,t.pitch)})));assert.equal(stats.missing,0);assert.ok(stats.multiCoveredPercent>95);

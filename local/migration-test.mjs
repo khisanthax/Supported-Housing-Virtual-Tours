@@ -199,7 +199,7 @@ try {
     const before=uploads;
     await page.goto(origin+'/staff/editor/?apartment='+row.apartment);
     await page.locator('#guide-capture').click();await page.locator('#capture-synthetic').click();
-    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('38 of'));
+    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('37 of 37'));
     await page.locator('#capture-settings').evaluate(d=>d.open=true);await page.locator('#capture-resolution').selectOption('1024');await page.locator('#capture-name').fill('Synthetic Cloud capture');
     await page.locator('#capture-stitch').click();await page.waitForFunction(()=>document.querySelector('#capture-stitch')?.disabled===false,{},{timeout:180000});assert.match(await page.locator('#capture-stitch-status').textContent(),/^Preview: candidate/,'Capture must produce a qualified candidate: '+JSON.stringify(errors));
     assert.equal(uploads,before,'No upload before approval');assert.equal(await page.locator('#capture-approved').isEnabled(),true,'Only a qualified feature candidate can be approved');

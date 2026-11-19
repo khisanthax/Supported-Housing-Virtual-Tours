@@ -17,7 +17,21 @@ export function plan(hfov=65,aspect=4/3,{overlap=.35,fovScale=1,maxFrames=64}={}
  for(const pitch of [90,-90])targets.push({id:'target-'+targets.length,yaw:0,pitch:rad(pitch)});
  if(targets.length>maxFrames)throw Error('This lens/framing needs more than '+maxFrames+' photos. Use the standard rear lens or a taller camera frame; saved photos are kept.');return targets;
 }
-export function coverage(frames,width=144,height=72){let missing=0;for(let y=0;y<height;y++)for(let x=0;x<width;x++){const ray=direction((x+.5)/width*2*Math.PI-Math.PI,Math.PI/2-(y+.5)/height*Math.PI);if(!frames.some(f=>project(ray,f)))missing++;}return{missing,total:width*height,percent:100*(1-missing/(width*height))}}
+// The bottom 20 degrees are deliberately covered by a neutral cap in room tours.
+export function photographedRows(height,omitFloor){
+ return omitFloor?Math.ceil(height*(160/180)-0.5):height;
+}
+export const isFloorTarget=target=>Math.abs(target.pitch+Math.PI/2)<1e-6;
+export const roomTargets=targets=>targets.filter(target=>!isFloorTarget(target));
+export function coverage(frames,width=144,height=72,omitFloor=false){
+ const rows=photographedRows(height,omitFloor),total=width*rows;
+ let missing=0;
+ for(let y=0;y<rows;y++)for(let x=0;x<width;x++){
+  const ray=direction((x+.5)/width*2*Math.PI-Math.PI,Math.PI/2-(y+.5)/height*Math.PI);
+  if(!frames.some(f=>project(ray,f)))missing++;
+ }
+ return{missing,total,percent:100*(1-missing/total)};
+}
 // W3C device axes: right +X, top +Y, outward screen +Z; rear camera looks -Z.
 // Rotation is intrinsic Z-X'-Y''. Convert ENU world to X=east,Y=up,Z=north.
 export function deviceBasis({alpha,beta,gamma},heading=0){
