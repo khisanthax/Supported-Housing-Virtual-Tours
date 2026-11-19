@@ -83,7 +83,7 @@ The correspondence subsets come from the same matched/RANSAC-filtered photograph
 
 The available real set has 30.72% high-disagreement overlap samples and is rejected in the normal baseline path. Both old and new OpenCV matchers connect only 14/25 photographs; no valid complete real-room after-image is claimed. Textureless/repetitive ceiling and floor views may fail the stricter matching requirements. More photographs are not a guaranteed cure; a mature camera/seam pipeline remains a possible next engineering step.
 
-OpenCV is now the default candidate engine. The sensor-only engine remains available as a **diagnostic preview that cannot be accepted**. Legacy/unverified previews cannot be accepted either. A failed attempt labels a retained image as a previous preview, directly above it, so an old result is not mistaken for a new OpenCV output. All source photos remain saved for retry/export.
+OpenCV is now the default candidate engine. The sensor-only engine remains available as a **diagnostic preview that cannot be accepted**. Legacy/unverified previews cannot be accepted either. A failed attempt labels a retained image as a previous preview, directly above it, so an old result is not mistaken for a new OpenCV output. All source photos remain saved for retry/export. The existing local source ZIP now optionally includes `diagnostic-preview.jpg`, its render report (including exact camera poses, FOV and gains used) and failure diagnostics; `capture.json.frames` still lists only original source JPEGs, byte-for-byte. A flag identifies a retained previous preview after a failed attempt. This is an unencrypted local diagnostic archive, not a published tour. Older source readers can ignore these optional fields/files.
 
 ## Identical-input controlled comparison
 
@@ -119,6 +119,7 @@ A browser probe verifies both required execution modes and verifies same-origin/
 
 - `npm test`: full regression suite, including full-axis gating, poles, transforms, monotonic projection, inverse roundtrips, borders and quality-contract rejection.
 - `node capture/roll-browser-test.mjs`: fake camera/sensors, steady wrong roll, correct capture, retake, pole references, landscape resume, metadata snapshot and saved frames.
+- `node capture/source-zip-browser-test.mjs`: exact source/preview bytes, camera solution and previous-attempt diagnostics, without uploads.
 - `node capture/worker-policy-browser-test.mjs`: worker binding/WASM execution and network-denial probe.
 - Existing recovery/calibration/guidance/browser scripts: complete capture mechanics, permission failures, restart/offline, qualified candidate-to-editor and backup byte parity. Fake-camera sweeps explicitly permit safe rejection and never call fake images approved photographic output.
 - `node capture/streak-test.mjs`: paired old/current local comparison; requires the before commit in local Git history. `CAPTURE_STREAK_CONTROLLED=1` selects the same perturbed 28-photo fixture. `CAPTURE_STREAK_PROJECTION_ONLY=1` skips expensive feature fitting.
@@ -126,4 +127,4 @@ A browser probe verifies both required execution modes and verifies same-origin/
 
 Physical checklist: refresh the isolated test site without clearing browser storage; start a new capture; perform Camera setup; deliberately roll at a wall and confirm capture pauses; level the bars and capture; repeat looking up/down; rotate screen, resume/realign, and select an unfinished dot; complete a static test room rotating around the lens; inspect the OpenCV candidate and save original sources. Confirm retakes, refresh recovery and all completed photos. Repeat on another device/browser before broad compatibility claims.
 
-No attached Android device was available in ADB. Latest problematic source ZIP plus its output JPEG are still needed to verify that exact failure. Keep real data private. **Do not merge until owner confirms acceptable Fold 7 results.**
+No attached Android device was available in ADB. The latest problematic source/export is still needed to verify that exact failure; the updated ZIP includes any saved preview/report, avoiding separate technical extraction. Keep real data private. **Do not merge until owner confirms acceptable Fold 7 results.**
