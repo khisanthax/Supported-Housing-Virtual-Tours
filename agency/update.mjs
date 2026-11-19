@@ -26,7 +26,7 @@ export function verifiedUpdate({bytes,signature,publicKey,installed}){
 // agency-owned backup storage, a tested artifact and code-only rollback.
 export async function applyApprovedUpdate({release,installed,approval,artifact,authorize,backup,deploy,health,rollbackCode,progress=async()=>{}}){
  if(!verifiedReleases.has(release))throw new UpdateError('The release must pass signature verification in this process before applying.');
- if(!approval||approval.installation!==installed.installation||approval.fromBuild!==installed.build||approval.manifestSha256!==release.manifestSha256||approval.version!==release.version||approval.revoked||approval.expires<=Date.now())throw new UpdateError('A current Administrator approval for this exact installation and release is required.');
+ if(!approval||approval.installation!==installed.installation||approval.fromBuild!==installed.build||approval.manifestSha256!==release.manifestSha256||approval.version!==release.version||approval.revoked||!Number.isSafeInteger(approval.expires)||approval.expires<=Date.now())throw new UpdateError('A current Administrator approval for this exact installation and release is required.');
  if(!Buffer.isBuffer(artifact)||hash(artifact)!==release.artifactSha256)throw new UpdateError('The update artifact failed verification.');
  const authority=await authorize(approval);
  if(!authority?.administratorActive||!authority.infrastructureAuthorized||authority.installation!==installed.installation)throw new UpdateError('Active Administrator approval and fresh Cloudflare infrastructure authorization are both required.');
@@ -35,7 +35,7 @@ export async function applyApprovedUpdate({release,installed,approval,artifact,a
  if(!snapshot?.restoreVerified||!snapshot.configurationPreserved||!['d1','kv','configuration'].every(x=>snapshot.covers?.includes(x))||!/^[a-f0-9]{64}$/.test(snapshot.sha256??''))throw new UpdateError('A complete, verified database, JPEG and configuration backup is required. Nothing was deployed.');
  // Revalidate after a potentially long backup, immediately before mutation.
  const current=await authorize(approval);
- if(!current?.administratorActive||!current.infrastructureAuthorized||current.installation!==installed.installation||approval.expires<=Date.now()||current.build!==installed.build)throw new UpdateError('Authorization or the installed build changed during backup. Nothing was deployed.');
+ if(!current?.administratorActive||!current.infrastructureAuthorized||current.installation!==installed.installation||approval.revoked||approval.expires<=Date.now()||current.build!==installed.build)throw new UpdateError('Authorization or the installed build changed during backup. Nothing was deployed.');
  await progress('applying');
  try{
   const result=await deploy({artifact,release,snapshot,expectedBuild:installed.build,preserveSecrets:true,additiveOnly:true});

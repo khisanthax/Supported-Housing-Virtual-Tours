@@ -18,7 +18,7 @@ function fixture(){const release=releaseFor(manifest),events=[];const approval={
 
 test('compatible updates require approval for the exact build and installation, fresh dual authorization and verified backups',async()=>{
  const unverified=fixture();unverified.options.release={...unverified.options.release};await assert.rejects(applyApprovedUpdate(unverified.options),/signature verification/);
- for(const change of [{installation:'other'},{fromBuild:'other'},{version:'0.2.2'},{manifestSha256:'other'},{expires:0},{revoked:true}]){const {options,events}=fixture();options.approval={...options.approval,...change};await assert.rejects(applyApprovedUpdate(options),/approval/);assert.equal(events.length,0);}
+ for(const change of [{installation:'other'},{fromBuild:'other'},{version:'0.2.2'},{manifestSha256:'other'},{expires:0},{expires:NaN},{expires:Infinity},{revoked:true}]){const {options,events}=fixture();options.approval={...options.approval,...change};await assert.rejects(applyApprovedUpdate(options),/approval/);assert.equal(events.length,0);}
  for(const authority of [{administratorActive:false},{infrastructureAuthorized:false},{installation:'other'}]){const {options,events}=fixture();const original=await options.authorize();options.authorize=async()=>({...original,...authority});await assert.rejects(applyApprovedUpdate(options),/authorization/);assert.equal(events.length,0);}
  const f=fixture();f.options.backup=async()=>({covers:['d1'],restoreVerified:true});await assert.rejects(applyApprovedUpdate(f.options),/complete, verified/);assert.deepEqual(f.events,['backing-up']);
 });

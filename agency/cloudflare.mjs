@@ -33,9 +33,15 @@ export function cloudflareApi(token,fetcher=fetch){
  };
 }
 
+export function provisioningEnvironment({token,account},base=process.env){
+ const env={...base,CLOUDFLARE_API_TOKEN:token,CLOUDFLARE_ACCOUNT_ID:account,CLOUDFLARE_API_BASE_URL:'https://api.cloudflare.com/client/v4',WRANGLER_SEND_METRICS:'false',WRANGLER_WRITE_LOGS:'false',WRANGLER_LOG_SANITIZE:'true',WRANGLER_LOG:'error',CI:'true'};
+ for(const key of ['CLOUDFLARE_API_KEY','CLOUDFLARE_EMAIL','CF_API_KEY','CF_EMAIL','CF_API_TOKEN','CF_API_BASE_URL','WRANGLER_OUTPUT_FILE_PATH','WRANGLER_OUTPUT_FILE_DIRECTORY'])delete env[key];
+ return env;
+}
+
 export function wranglerRunner({token,account}){
  return (args,stdin='')=>new Promise((resolve,reject)=>{
-  const child=spawn(process.execPath,[join(root,'node_modules/wrangler/bin/wrangler.js'),...args],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,CLOUDFLARE_API_TOKEN:token,CLOUDFLARE_ACCOUNT_ID:account,WRANGLER_SEND_METRICS:'false',CI:'true'}});
+  const child=spawn(process.execPath,[join(root,'node_modules/wrangler/bin/wrangler.js'),...args],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe'],env:provisioningEnvironment({token,account})});
   const timeout=setTimeout(()=>child.kill(),120000);timeout.unref();
   let output='',overflow=false;
   child.stdout.on('data',chunk=>{output+=chunk;if(output.length>8*1024*1024){overflow=true;child.kill();}});

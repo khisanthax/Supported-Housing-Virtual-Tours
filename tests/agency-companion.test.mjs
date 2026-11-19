@@ -5,9 +5,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {createCompanion} from '../agency/server.mjs';
-import {provision,freePlan,SetupError} from '../agency/cloudflare.mjs';
+import {provision,freePlan,SetupError,provisioningEnvironment} from '../agency/cloudflare.mjs';
 const account='a'.repeat(32),other='b'.repeat(32);
 const free=[{price:0,state:'Provisioned',rate_plan:{id:'synthetic-workers-free',scope:'workers'}}];
+
+test('provisioning suppresses Wrangler disk/debug outputs and cannot inherit developer fallback credentials or an alternate API destination',()=>{
+ const env=provisioningEnvironment({token:'synthetic-agency-token',account},{CLOUDFLARE_API_KEY:'synthetic-unwanted',CF_API_TOKEN:'synthetic-unwanted',WRANGLER_WRITE_LOGS:'true',WRANGLER_LOG_SANITIZE:'false',WRANGLER_LOG:'debug',WRANGLER_OUTPUT_FILE_PATH:'unwanted-file',CLOUDFLARE_API_BASE_URL:'https://unwanted.example'});
+ assert.equal(env.CLOUDFLARE_API_TOKEN,'synthetic-agency-token');assert.equal(env.CLOUDFLARE_ACCOUNT_ID,account);assert.equal(env.CLOUDFLARE_API_BASE_URL,'https://api.cloudflare.com/client/v4');assert.equal(env.WRANGLER_WRITE_LOGS,'false');assert.equal(env.WRANGLER_LOG_SANITIZE,'true');assert.equal(env.WRANGLER_LOG,'error');assert.equal(env.CLOUDFLARE_API_KEY,undefined);assert.equal(env.CF_API_TOKEN,undefined);assert.equal(env.WRANGLER_OUTPUT_FILE_PATH,undefined);
+});
 
 test('free-plan preflight rejects empty, ambiguous, paid, trial and zone-Free evidence',()=>{
  assert.equal(freePlan(free,['synthetic-workers-free']),true);
