@@ -1,3 +1,5 @@
+Current revision: see [roll and projection defect investigation](ROLL-STREAKS.md). It supersedes the default-engine and automatic radial-fitting descriptions below, which document the earlier experiment. Full real-room quality acceptance remains open.
+
 # Stitching quality investigation — 18 November 2026
 
 **Acceptance: FAIL / incomplete.** Controlled alignment improves, but continuity/edge artifacts do not yet pass. Only an explicitly selected experimental candidate is deployed to the already authorized isolated capture-test site; the original engine remains default. Production sites are unchanged. Do not describe this experiment as a fix for the owner's four screenshots.

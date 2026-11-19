@@ -1,5 +1,5 @@
 import {dot} from './math.js';
-import {cameraRay,refineRotations,connectedFrames} from './alignment.js';
+import {cameraRay,refineRotations,connectedFrames,bearingResidual,pixelResidual,interpolateScale} from './alignment.js';
 export async function alignFrames(frames,progress=()=>{}){
  await import('./vendor/opencv.js');const cv=globalThis.cv;
  if(!cv?.Mat)await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('OpenCV initialization timed out. Sources kept.')),30000);cv.onRuntimeInitialized=()=>{clearTimeout(timer);resolve()}});
@@ -30,14 +30,21 @@ export async function alignFrames(frames,progress=()=>{}){
    }finally{from?.delete();to?.delete();H?.delete();mask?.delete()}
   }
   const retained=frames.map((f,i)=>i).filter(i=>edges.some(e=>e.i===i||e.j===i)),excluded=frames.filter((f,i)=>!retained.includes(i)).map(f=>f.id);
-  if(retained.length<frames.length*.8){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. This is a limitation of the experimental matcher; no panorama was created.');error.diagnostics={keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,ransacPairs:diagnosticPairs};throw error;}
-  const index=new Map(retained.map((old,i)=>[old,i]));edges=edges.map(e=>({...e,i:index.get(e.i),j:index.get(e.j)}));frames=retained.map(i=>frames[i]);
+  if(retained.length!==frames.length){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. This is a limitation of the experimental matcher; no panorama was created. Every source photo must participate; no photos were dropped.');error.diagnostics={keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,missingMatchedSourceIds:excluded,coverage:"not rendered: incomplete match graph",ransacPairs:diagnosticPairs};throw error;}
   if(!connectedFrames(frames.length,edges))throw Error('Feature graph has disconnected components: '+edges.map(e=>frames[e.i].id+'-'+frames[e.j].id).join(' ')+' Sources retained; no guessed alignment.');
-  let best;for(const scale of [.45,.55,.65,.75,.85,.95,1,1.1,1.2]){const r=refineRotations(frames,edges,{scale});if(!best||r.after<best.after)best={...r,scale,k1:0};progress({stage:'alignment',scale,error:r.after})}
-  for(const k1 of [-.12,-.06,.06,.12]){const r=refineRotations(frames,edges,{scale:best.scale,k1});if(r.after<best.after)best={...r,scale:best.scale,k1}}
+  // Deterministic held-out feature correspondences; not independent scene ground truth.
+  const training=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5>1)})),heldout=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5===1)}));
+  let best;const profile=[];const consider=(scale,k1)=>{try{const r=refineRotations(frames,training,{scale,k1}),validation=bearingResidual(frames,heldout,r.poses,{scale,k1});profile.push({scale,error:validation.degrees});if(!best||validation.degrees<best.validation.degrees)best={...r,scale,k1,validation};}catch(error){if(!/camera\/lens model|folds the image/.test(error.message))throw error;}};
+  for(const scale of [.45,.55,.65,.75,.85,.95,1,1.1,1.2]){consider(scale,0);progress({stage:'alignment',scale,error:best?.after})}
+  if(!best)throw Error('No valid camera model; original photos kept.');
+  const interpolated=interpolateScale(profile);if(interpolated)consider(interpolated,0);
+  // No automatic radial coefficient: full optical calibration is not established.
+  const testEdges=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5===0)}));best.heldout=bearingResidual(frames,testEdges,best.poses,{scale:best.scale,k1:best.k1});best.pixels=pixelResidual(frames,testEdges,best.poses,features,{scale:best.scale,k1:best.k1});
+  if(best.pixels.invalid||best.pixels.rms>3||best.pixels.p90>6){const error=Error('The photos still do not line up reliably. No panorama was created. Originals are kept; retry or retake overlapping views while rotating around the camera lens.');error.diagnostics={heldoutPixels:best.pixels,thresholds:{rms:3,p90:6},originalFrames:frames.length,usedFrames:frames.length};throw error;}
+  if(best.heldout.degrees>2.5||best.heldout.degrees>best.after*3+.5)throw Error('The alignment could not be verified using the other image details. No panorama created; original photos kept.');
   const gains=frames.map(()=>0);for(let n=0;n<50;n++){const sums=frames.map(()=>0),counts=frames.map(()=>0);for(const e of edges){const values=e.matches.map(m=>m.gain).sort((a,b)=>a-b),g=values[Math.floor(values.length/2)];sums[e.j]+=gains[e.i]+g;sums[e.i]+=gains[e.j]-g;counts[e.i]++;counts[e.j]++}for(let i=1;i<frames.length;i++)if(counts[i])gains[i]=Math.max(-.5,Math.min(.5,sums[i]/counts[i]))}
-  const exposureBefore=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+m.gain*m.gain,0),0)/best.pairs),exposureAfter=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+(m.gain+gains[e.i]-gains[e.j])**2,0),0)/best.pairs);
+  const exposureBefore=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+m.gain*m.gain,0),0)/edges.reduce((n,e)=>n+e.matches.length,0)),exposureAfter=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+(m.gain+gains[e.i]-gains[e.j])**2,0),0)/edges.reduce((n,e)=>n+e.matches.length,0));
   if(best.after>2.5)throw Error('Residual alignment '+best.after.toFixed(3)+' exceeds the experimental quality limit; likely parallax, wrong lens or bad matches. Originals kept.');
-  return{frames:frames.map((f,i)=>({...f,pose:best.poses[i],hfov:2*Math.atan(Math.tan(f.hfov*Math.PI/360)*best.scale)*180/Math.PI,radial:best.k1,gain:Math.exp(gains[i])})),report:{exposureBeforeLogRMS:exposureBefore,exposureAfterLogRMS:exposureAfter,excludedUnmatchedFrames:excluded,engine:'OpenCV AKAZE/RANSAC + bounded rotation graph',edges:edges.length,pairs:best.pairs,beforeDegrees:best.before,afterDegrees:best.after,focalScale:best.scale,radialK1:best.k1,wasmHeapBytes:cv.HEAPU8?.buffer.byteLength??null}};
+  return{frames:frames.map((f,i)=>({...f,pose:best.poses[i],hfov:2*Math.atan(Math.tan(f.hfov*Math.PI/360)*best.scale)*180/Math.PI,radial:best.k1,gain:Math.exp(gains[i])})),report:{exposureBeforeLogRMS:exposureBefore,exposureAfterLogRMS:exposureAfter,excludedUnmatchedFrames:excluded,engine:'OpenCV AKAZE/RANSAC + bounded rotation graph',edges:edges.length,pairs:best.pairs,beforeDegrees:best.before,afterDegrees:best.after,heldoutDegrees:best.heldout.degrees,heldoutPairs:best.heldout.pairs,tuningDegrees:best.validation.degrees,heldoutPixels:best.pixels,radialFitting:"disabled: no independent optical calibration",originalFrames:frames.length,usedFrames:frames.length,focalScale:best.scale,radialK1:best.k1,wasmHeapBytes:cv.HEAPU8?.buffer.byteLength??null}};
  }finally{for(const f of features)f.desc.delete();orb?.delete();matcher?.delete()}
 }

@@ -1,5 +1,7 @@
 # Isolated Capture Room experiment
 
+Current roll/quality revision: [findings, comparisons and physical checklist](ROLL-STREAKS.md). OpenCV is the default candidate engine; sensor-only rendering is diagnostic and cannot be accepted into a tour. New live level/reference bars block wrong roll, including ceiling/floor targets. Every source must participate, image-space alignment and overlap checks must pass, and visual review remains required. Previous/legacy previews are preserved but clearly labelled; failed attempts do not produce a newly approved panorama. Keep original source ZIPs. Production capture remains disabled; do not merge until the owner confirms acceptable Fold 7 results.
+
 Testing-only backup option: on the isolated capture-test website, choose Export Backup, select **Testing only: ZIP without a passphrase**, then Continue. Encrypted export remains the default. Plain exports are named UNENCRYPTED and contain readable apartment.shtour data; keep them private. The test website can restore them directly. Other editions can import the extracted apartment.shtour through legacy import. This option is injected only into the isolated capture build; production backup exports are unchanged. Export original captures (local ZIP) already requires no passphrase.
 
 ## Physical rotation report: recovery and full-viewport revision

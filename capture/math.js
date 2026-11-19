@@ -7,6 +7,7 @@ export function checkFrame(frame){
  if(!frame||!Number.isFinite(frame.hfov)||frame.hfov<35||frame.hfov>100||!Number.isFinite(frame.aspect)||frame.aspect<0.4||frame.aspect>2.5)throw Error('Invalid camera field of view/aspect.');
  for(const k of ['r','u','f'])if(!Array.isArray(frame.pose?.[k])||frame.pose[k].length!==3||frame.pose[k].some(x=>!Number.isFinite(x))||Math.abs(dot(frame.pose[k],frame.pose[k])-1)>.01)throw Error('Invalid camera orientation.');
  if(Math.abs(dot(frame.pose.r,frame.pose.u))>.01||Math.abs(dot(frame.pose.f,frame.pose.u))>.01||Math.abs(dot(frame.pose.r,frame.pose.f))>.01)throw Error('Invalid camera axes.');
+ const {r,u,f}=frame.pose,c=[r[1]*u[2]-r[2]*u[1],r[2]*u[0]-r[0]*u[2],r[0]*u[1]-r[1]*u[0]];if(dot(c,f)<.99)throw Error('Reflected camera axes are not a valid rotation.');
  return frame;
 }
 export function project(ray,frame){const z=dot(ray,frame.pose.f);if(z<=0)return null;const t=Math.tan(rad(frame.hfov)/2),x=dot(ray,frame.pose.r)/z/t,y=dot(ray,frame.pose.u)/z/(t/frame.aspect);return Math.abs(x)<1&&Math.abs(y)<1?{x:(x+1)/2,y:(1-y)/2,weight:Math.pow(1-Math.max(Math.abs(x),Math.abs(y)),2)}:null}
