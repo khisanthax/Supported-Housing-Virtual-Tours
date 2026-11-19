@@ -12,6 +12,8 @@ const state={name:'synthetic-native',account,installation,resourceName:'syntheti
 const signed=signedManifest({artifact,privateKey:signer.privateKey,edition:'cloudflare',version:'0.2.1',build:toBuild,schema:5,from:['0.2.0'],fromSchemas:[4],migration:'additive',notes:'Synthetic native runtime migration and recovery rehearsal'}),releaseBundle={...signed,artifact,publicKey:signer.publicKey.export({type:'spki',format:'pem'})};
 const vars={INSTALLATION_MODE:'agency',INSTALLATION_ID:installation,APP_ORIGIN:state.origin,AGENCY_BROWSER_SETUP:'1',STAFF_AUTH_MODE:'password',STAFF_ACCOUNTS:'1',TOUR_UAC:'1',TOUR_API_BACKEND:'durable-object',DIAGNOSTICS_ENABLED:'1',SCHEMA_REQUIRED:'4',SCHEMA_COMPATIBLE_MAX:'5',APP_BUILD:fromBuild,UPDATE_MANIFEST:signed.bytes.toString('base64'),UPDATE_SIGNATURE:signed.signature.toString('base64'),UPDATE_PUBLIC_KEY:releaseBundle.publicKey};
 const common={modules:true,compatibilityDate:'2026-11-03',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:state.database},kvNamespaces:{PHOTOS:state.namespace},durableObjects:{STAFF_LOGIN:{className:'StaffLogin',useSQLite:true}},serviceBindings:{ASSETS:async()=>new Response('Synthetic assets')}};
+async function verifyInterruption(point){
+const outcome=point.endsWith('complete')?'complete':'recovered';
 const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:"router",modules:true,compatibilityDate:"2026-11-03",script:"export default {fetch(request,env){const next=request.headers.get(\"X-Synthetic-Target\")===\"candidate\";const clean=new Request(request);clean.headers.delete(\"X-Synthetic-Target\");return (next?env.NEXT:env.PREV).fetch(clean);}}",serviceBindings:{PREV:"previous",NEXT:"candidate"}},{...common,name:'previous',script:source,bindings:{...vars,GUEST_CODE_KEY:guestKey}},{...common,name:'candidate',script:candidate,bindings:{...vars,GUEST_CODE_KEY:guestKey,APP_BUILD:toBuild,SCHEMA_REQUIRED:'5',SCHEMA_COMPATIBLE_MAX:'6'}}]}));
 try{
  const db=await mf.getD1Database('DB','previous'),kv=await mf.getKVNamespace('PHOTOS','previous');
@@ -38,9 +40,19 @@ try{
  };
  api.page=async()=>{const result=await kv.list();return {result:result.keys,result_info:{cursor:result.list_complete?'':result.cursor}};};api.binary=async path=>kv.get(decodeURIComponent(path.split('/').pop()),'arrayBuffer');
  const run=async args=>{const cfg=JSON.parse(await readFile(args[args.indexOf('--config')+1],'utf8'));assert.equal(await readFile(cfg.main,'utf8'),candidate);assert.equal(cfg.vars.APP_BUILD,toBuild);assert.equal(cfg.vars.INSTALLATION_ID,installation);versions.push({id:'candidate',annotations:{'workers/message':'LT360-update-'+approval.id}});};
- const phases=[];const result=await runInstallationUpdate({account,name:state.name,directory,requestId:approval.id,api,run,releaseBundle,verifiedFreePlanIds:['synthetic-free'],fetcher,checkpoint:async phase=>{phases.push(phase);if(phase==='backup-ready')await check('/api/staff/accounts',503,{method:'POST',cookie,body:{username:'must-not-write',role:'editor',password:'Synthetic denied password'}});}});
- assert.equal(result.phase,'complete');assert.equal(activations,1);assert.equal(active,'candidate');assert.deepEqual((await db.prepare('SELECT username,password_verifier,role,revision FROM staff_accounts ORDER BY username').all()).results,credentialsBefore.results);assert.deepEqual(Buffer.from(await kv.get(photo,'arrayBuffer')),image);
- const health=await(await check('/api/installation-health',200)).json();assert.equal(health.version,'0.2.1');assert.equal(health.schema,5);assert.equal(health.build,toBuild);assert.equal(health.ready,true);
+ const options={account,name:state.name,directory,requestId:approval.id,api,run,releaseBundle,verifiedFreePlanIds:['synthetic-free'],fetcher};
+ const interrupt=async phase=>{
+  if(phase==='backup-ready')await check('/api/staff/accounts',503,{method:'POST',cookie,body:{username:'must-not-write',role:'editor',password:'Synthetic denied password'}});
+  if(phase==='verifying' && outcome==='recovered')throw Error('Synthetic candidate verification failure');
+  if(phase===point)throw {simulatedCrash:true};
+ };
+ await assert.rejects(runInstallationUpdate({...options,checkpoint:interrupt}),error=>error.simulatedCrash===true);
+ for(let resume=0;resume<2;resume++)assert.equal((await runInstallationUpdate(options)).phase,outcome);
+ const success=outcome==='complete';
+ assert.equal(activations,success?1:2);assert.equal(active,success?'candidate':'previous');
+ assert.equal((await db.prepare('SELECT count(*) n FROM maintenance_lock').first()).n,0);
+ assert.deepEqual((await db.prepare('SELECT username,password_verifier,role,revision FROM staff_accounts ORDER BY username').all()).results,credentialsBefore.results);assert.deepEqual(Buffer.from(await kv.get(photo,'arrayBuffer')),image);
+ const health=await(await check('/api/installation-health',200)).json();assert.equal(health.version,success?'0.2.1':'0.2.0');assert.equal(health.schema,5);assert.equal(health.build,success?toBuild:fromBuild);assert.equal(health.ready,true);
  const receipt=await db.prepare('SELECT backup_file FROM maintenance_requests WHERE id=?').bind(approval.id).first(),restored=await verifySnapshot(join(directory,'updates',approval.id,receipt.backup_file),{privateKey:recovery.privateKey.export({format:'jwk'}),onImage:async(name,bytes)=>{assert.equal(name,photo);assert.deepEqual(bytes,image);}});assert.equal(restored.database.prepare('SELECT COUNT(*) n FROM staff_accounts').get().n,2);restored.database.close();
  const staff=(await check('/api/staff/sign-in',200,{method:'POST',body:{username:'synthetic-staff',password:'Synthetic retained staff password'}})).headers.get('Set-Cookie').split(';')[0];
  const tour=JSON.parse(await readFile(new URL('../cloudflare/sample.json',import.meta.url),'utf8'));
@@ -48,8 +60,14 @@ try{
   const bytes=await readFile(new URL('../cloudflare/sample-images/'+room.id+'.jpg',import.meta.url));
   photos[room.id]=(await(await check('/api/staff/photos',201,{method:'POST',cookie:staff,type:'image/jpeg',body:bytes})).json()).id;
  }
- await check('/api/staff/apartments',201,{method:'POST',cookie:staff,body:{tour,photos}});
- // The retained real old code remains able to write after the additive schema.
- active='previous';await check('/api/staff/accounts',201,{method:'POST',cookie,body:{username:'synthetic-after-recovery',role:'editor',password:'Synthetic recovered code password'}});assert.equal((await(await check('/api/installation-health',200)).json()).ready,true);
- console.log('Native update acceptance passed: signed Administrator approval, agency-key sealed secret, real D1/KV encrypted/restored snapshot, maintenance write denial, staged activation, additive schema, preserved credentials/JPEGs, target health and retained-code recovery compatibility. Cloudflare control plane is simulated; no remote account or billing operation.');
-}finally{await mf.dispose();await rm(directory,{recursive:true,force:true});}
+ const created=await(await check('/api/staff/apartments',201,{method:'POST',cookie:staff,body:{tour,photos}})).json();
+ const title='Synthetic edit after '+point;
+ await check('/api/staff/apartments',201,{method:'POST',cookie:staff,body:{tour:{...tour,title},photos,replacement:created.id,expectedVersion:created.version}});
+ const draft=await(await check('/api/staff/drafts/'+created.id,200,{cookie:staff})).json();
+ assert.equal(draft.tour.title,title);assert.equal(draft.revision,created.version+1);
+ console.log('Native update acceptance passed at '+point+' with two resumes and a signed-in staff draft edit.');
+}finally{await mf.dispose();}
+}
+try{
+ for(const point of ['before-complete','complete','before-recovered','recovered'])await verifyInterruption(point);
+}finally{await rm(directory,{recursive:true,force:true});}

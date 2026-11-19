@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,generateKeyPairSync,sign,createHash} from 'node:crypto';
-import {readFile,mkdir} from 'node:fs/promises';
-import {resolve,sep} from 'node:path';
+import {readFile,mkdir,mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {createSnapshot} from './snapshot.mjs';
+import {resolve,sep,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import worker,{StaffLogin} from '../cloudflare/worker.mjs';
@@ -36,7 +38,13 @@ await new Promise(r=>app.listen(0,'127.0.0.1',r));
 const transport='http://127.0.0.1:'+app.address().port;
 const probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
 const origin='http://127.0.0.1:'+port;
-const companion=createCompanion({origin,clientId:'synthetic',clientSecret:'synthetic',scopes:'synthetic',stateDirectory:'unused-synthetic',build:'synthetic',verifiedFreePlanIds:['synthetic'],fetcher:async url=>url.endsWith('/token')?Response.json({access_token:'synthetic',expires_in:600}):new Response(null,{status:200}),apiFactory:()=>async()=>[{id:'a'.repeat(32),name:'Synthetic Housing Agency'}],runnerFactory:()=>()=>{},deploy:async({progress})=>{progress('Preparing synthetic resources');return {ready:false,website:agencyOrigin,ticket,expires:Date.now()+600000};}});
+const stateDirectory=await mkdtemp(join(tmpdir(),'lt360-browser-'));
+ let deploymentStarts=0;
+const companion=createCompanion({origin,clientId:'synthetic',clientSecret:'synthetic',scopes:'synthetic',stateDirectory,build:'synthetic',verifiedFreePlanIds:['synthetic'],fetcher:async url=>url.endsWith('/token')?Response.json({access_token:'synthetic',expires_in:600}):new Response(null,{status:200}),apiFactory:()=>async(path,options)=>{
+ if(path.startsWith('/accounts?'))return [{id:'a'.repeat(32),name:'Synthetic Housing Agency'}];
+ if(path.endsWith('/query'))return [{success:true,results:database.prepare(options.body.sql).all(...options.body.params)}];
+ throw Error('Unexpected synthetic provider request');
+},runnerFactory:()=>()=>{},deploy:async({progress})=>{deploymentStarts++;progress('Preparing synthetic resources');return {ready:false,website:agencyOrigin,ticket,expires:Date.now()+600000};}});
 await new Promise(r=>companion.listen(port,'127.0.0.1',r));
 const output=new URL('../test-results/agency-browser/',import.meta.url);await mkdir(output,{recursive:true});
 const browser=await chromium.launch();const context=await browser.newContext({viewport:{width:1360,height:1000}}),page=await context.newPage();
@@ -63,11 +71,24 @@ try{
  await page.goto(origin);await page.screenshot({path:fileURLToPath(new URL('01-deploy.png',output)),fullPage:true});
  await page.getByRole('link',{name:'Connect to Cloudflare',exact:true}).click();
  await page.getByRole('link',{name:'Continue synthetic authorization',exact:true}).click();
- await page.locator('#choose').waitFor({state:'visible'});await page.locator('#name').fill('synthetic-housing');await page.locator('#free').check();await page.getByRole('button',{name:'Deploy LevelTwo360',exact:true}).click();
+ await page.locator('#choose').waitFor({state:'visible'});await page.locator('#name').fill('synthetic-housing');await page.locator('#free').check();await page.locator('#deploy').evaluate(form=>{form.requestSubmit();form.requestSubmit();});
  await page.locator('#next').waitFor({state:'visible'});await page.screenshot({path:fileURLToPath(new URL('02-resources-prepared.png',output)),fullPage:true});
  await page.getByRole('link',{name:'Continue agency setup',exact:true}).click();await page.locator('#setup').waitFor({state:'visible'});
  assert.equal(new URL(page.url()).hash,'');
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:fileURLToPath(new URL('03-administrator-mobile.png',output)),fullPage:true});
+ assert.equal(deploymentStarts,1);
+ const expires=database.prepare('SELECT expires FROM agency_setup').get().expires;
+ database.prepare('UPDATE agency_setup SET expires=0').run();
+ for(const width of [1360,390]){
+  await page.setViewportSize({width,height:844});await page.goto(origin);await page.getByRole('link',{name:'Continue agency setup'}).click();
+  await page.locator('#username').fill('test-expired');await page.locator('#password').fill('Synthetic browser Administrator password');await page.locator('#confirmation').fill('Synthetic browser Administrator password');
+  await page.getByRole('button',{name:'Create Administrator',exact:true}).click();
+  await page.getByRole('heading',{name:'Your setup link has expired or changed'}).waitFor();
+  if(width===390)await page.screenshot({path:fileURLToPath(new URL('07-expired-setup-mobile.png',output)),fullPage:true});
+  assert.equal(await page.locator('#resume-link').getAttribute('href'),'https://setup.example.invalid');
+ }
+ assert.equal(database.prepare('SELECT count(*) n FROM staff_accounts').get().n,0);
+ database.prepare('UPDATE agency_setup SET expires=?').run(expires);
  // A refresh discards the one-time credential. Check the public recovery action.
  await page.reload();await page.getByRole('link',{name:'Return to deployment wizard'}).waitFor();
  assert.equal(await page.locator('#resume-link').getAttribute('href'),'https://setup.example.invalid');
@@ -95,20 +116,39 @@ try{
  await fileInput.dispatchEvent('cancel');assert.ok(await page.locator('#approve').isDisabled());
  await selectKey(newer);await page.getByText(/Recovery file verified/).waitFor();await page.locator('#confirmed').check();await page.getByRole('button',{name:'Approve this update',exact:true}).click();await page.locator('#handoff').waitFor({state:'visible'});await page.screenshot({path:fileURLToPath(new URL('06-update-approved.png',output)),fullPage:true});
  assert.ok(database.prepare('SELECT secret_backup FROM maintenance_requests').get().secret_backup);assert.ok(requestBodies.every(body=>!body.includes(key.privateKey.d)&&!body.includes(newer.privateKey.d)),'Private recovery key must never leave the browser');
- await page.getByRole('button',{name:'Revoke update approval',exact:true}).click();await page.getByText('Update approval revoked.',{exact:true}).waitFor();assert.ok(database.prepare('SELECT revoked FROM maintenance_requests').get().revoked);
+ const maintenanceReads=[];page.on('request',r=>{if(r.url().includes('/api/staff/maintenance')&&r.method()==='GET')maintenanceReads.push(new URL(r.url()).search);});
+ await page.reload();await page.locator('#handoff').waitFor();assert.deepEqual(maintenanceReads,['?view=status']);
+ await page.locator('#show-history').click();await page.locator('#history').getByText(/separate Cloudflare authorization/).waitFor();
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelector('#history').textContent.includes('Update approved'));
+ await page.getByRole('button',{name:'Hide update history'}).click();
+ await page.locator('#requests').getByRole('button',{name:'Revoke update approval',exact:true}).click();await page.getByText('Update approval revoked.',{exact:true}).waitFor();assert.ok(database.prepare('SELECT revoked FROM maintenance_requests').get().revoked);
+ database.exec("UPDATE maintenance_requests SET expires=0,revoked=NULL");
+ await page.reload();await page.getByText(/Update approval expired/).waitFor();assert.ok(await page.locator('#handoff').isHidden());
+ database.exec("UPDATE maintenance_requests SET phase='complete',message='Update verified; editing is available'");
+ await page.reload();await page.locator('#message').getByText(/editing is available/).waitFor();
+ database.exec('INSERT INTO maintenance_lock SELECT 1,id,0 FROM maintenance_requests');
+ await page.reload();await page.getByRole('heading',{name:'Resume installation recovery'}).waitFor();
+ assert.equal(await page.locator('#companion').getAttribute('href'),'https://setup.example.invalid');
+ database.exec('DELETE FROM maintenance_lock');
  assert.equal(database.prepare('SELECT COUNT(*) n FROM staff_accounts').get().n,1);assert.ok(database.prepare('SELECT completed FROM agency_setup').get().completed);
  // Drive each render state through the shipped wizard at desktop and phone widths.
  const statuses=await context.newPage();
+ statuses.on('pageerror',e=>errors.push(e.message));
  const accounts=[{name:'Synthetic test agency',id:'a'.repeat(32)}];
  let response,drop=false;
  await statuses.route(origin+'/api/state',route=>drop?route.abort():route.fulfill({json:response}));
  const state=(extra={})=>({accounts,connected:false,running:false,freeVerificationAvailable:true,...extra});
- const bytes=Buffer.alloc(16*1024*1024,77),digest=createHash('sha256').update(bytes).digest('hex');
- await statuses.route(origin+'/api/updates/list',route=>route.fulfill({json:{requests:[{id:'1'.repeat(32),phase:'complete',created:Date.now(),version:'0.2.1',backup_digest:digest}]}}));
- await statuses.route(origin+'/api/updates/backup',route=>{
-  assert.equal(route.request().method(),'POST');assert.equal(new URL(route.request().url()).search,'');
-  return route.fulfill({headers:{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"'},body:bytes});
- });
+ const requestId=database.prepare('SELECT id FROM maintenance_requests').get().id;
+ const home=join(stateDirectory,accounts[0].id,'synthetic-housing'),file='snapshot-0000000000000001.lt360backup';
+ const backupDir=join(home,'updates',requestId);await mkdir(backupDir,{recursive:true});
+ await writeFile(join(home,'installation.json'),JSON.stringify({name:'synthetic-housing',account:accounts[0].id,installation:env.INSTALLATION_ID,database:'synthetic'}));
+ const imageBytes=Buffer.alloc(1024*1024,77);
+ const snapshot=await createSnapshot({path:join(backupDir,file),publicKey:newer.publicKey,configuration:{synthetic:true},query:async()=>[],
+  listImages:async function*(){for(let i=0;i<10;i++)yield {name:'synthetic-'+i};},readImage:async()=>imageBytes});
+ const digest=snapshot.sha256;
+ database.prepare('UPDATE maintenance_requests SET backup_file=?,backup_digest=? WHERE id=?').run(file,digest,requestId);
+ await statuses.goto(origin+'/oauth/start');await statuses.getByRole('link',{name:'Continue synthetic authorization'}).click();
  for(const width of [1360,390]){
   await statuses.setViewportSize({width,height:844});
   response=state({freeVerificationAvailable:false});await statuses.goto(origin);
@@ -116,8 +156,19 @@ try{
   response=state({connected:true,freeVerificationAvailable:false});await statuses.reload();
   await statuses.locator('#choose').waitFor();assert.ok(await statuses.locator('#start-install').isDisabled());
   await statuses.locator('#name').fill('synthetic-housing');await statuses.locator('#inspect-updates').click();
-  const saved=statuses.waitForEvent('download');await statuses.getByRole('button',{name:'Download encrypted installation backup'}).click();
-  const download=await saved;assert.match(download.suggestedFilename(),/\.lt360backup$/);assert.equal(createHash('sha256').update(await readFile(await download.path())).digest('hex'),digest);
+  await statuses.getByRole('button',{name:'Download encrypted installation backup'}).waitFor({timeout:7000});
+  if(width===1360){
+   const network=await context.newCDPSession(statuses);
+   await network.send('Network.enable');
+   await network.send('Network.emulateNetworkConditions',{offline:false,latency:20,downloadThroughput:512*1024,uploadThroughput:-1});
+   try{
+    const [partial]=await Promise.all([statuses.waitForEvent('download'),statuses.getByRole('button',{name:'Download encrypted installation backup'}).click()]);
+    await partial.cancel();assert.equal(await partial.failure(),'canceled');
+   }finally{await network.send('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1});await network.detach();}
+  }
+  const [reply,download]=await Promise.all([statuses.waitForResponse(r=>new URL(r.url()).pathname==='/api/updates/backup').then(r=>{assert.equal(r.status(),200);return r;}),statuses.waitForEvent('download'),statuses.getByRole('button',{name:'Download encrypted installation backup'}).click()]);
+  assert.equal(reply.headers()['x-backup-sha256'],digest);assert.ok(Number(reply.headers()['content-length'])>16*1024*1024);
+  assert.equal(download.suggestedFilename(),'LevelTwo360-encrypted-installation.lt360backup');assert.equal(createHash('sha256').update(await readFile(await download.path())).digest('hex'),digest);
   response=state();await statuses.goto(origin+'/?authorization=failed');
   await statuses.getByRole('heading',{name:'Authorization did not finish'}).waitFor();
   assert.equal(await statuses.locator('#authorize').getAttribute('href'),'/oauth/start');
@@ -129,6 +180,12 @@ try{
    await statuses.getByRole('heading',{name:heading}).waitFor();
    assert.equal(await statuses.getByRole('link',{name:action,exact:true}).getAttribute('href'),agencyOrigin+'/staff');
   }
+  response=state({result:{website:agencyOrigin,expires:1,revoked:true}});await statuses.reload();
+  await statuses.getByRole('heading',{name:'Your setup link has expired'}).waitFor();
+  assert.equal(await statuses.locator('#open').getAttribute('href'),'/oauth/start');
+  response=state({sessionExpired:true});await statuses.reload();
+  await statuses.getByRole('heading',{name:'Cloudflare sign-in expired'}).waitFor();
+  assert.equal(await statuses.locator('#authorize').getAttribute('href'),'/oauth/start');
   response=state({error:'Setup stopped safely.'});await statuses.reload();
   await statuses.getByRole('heading',{name:'Reconnect to continue'}).waitFor();
   drop=true;await statuses.reload();await statuses.getByText(/temporarily unavailable/).waitFor();drop=false;
@@ -139,4 +196,4 @@ try{
  await statuses.close();
  assert.equal(companionPassword,false);assert.deepEqual(errors,[]);
  console.log('Agency browser acceptance passed: OAuth/account selection, deployment progress, mobile bootstrap, direct password delivery, atomic closure, secret-free summary, sign-in, verified release review, local-only private recovery key download, durable Administrator approval and revocation. Cloudflare/OAuth providers are synthetic.');
-}catch(error){console.error('Browser fixture failed at path:',new URL(page.url()).pathname,'status:',await page.locator('#message').textContent({timeout:1000}).catch(()=>''));await page.screenshot({path:fileURLToPath(new URL('failure.png',output)),fullPage:true});throw error;}finally{await browser.close();await new Promise(r=>companion.close(r));await new Promise(r=>app.close(r));database.close();}
+}catch(error){console.error('Browser fixture failed at path:',new URL(page.url()).pathname,'status:',await page.locator('#message').textContent({timeout:1000}).catch(()=>''));await page.screenshot({path:fileURLToPath(new URL('failure.png',output)),fullPage:true});throw error;}finally{await browser.close();await new Promise(r=>companion.close(r));await new Promise(r=>app.close(r));database.close();await rm(stateDirectory,{recursive:true,force:true});}

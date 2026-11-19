@@ -81,6 +81,20 @@ test('revocation after activation triggers retained-code recovery before reporti
 });
 
 for(const phase of ['complete','recovered']){
+ test('D1 commits '+phase+' before its response is lost',async t=>{
+  const f=await fixture(t),original=f.options.api;f.failHealth=phase==='recovered';
+  let lost=false;
+  f.options.api=Object.assign(async(path,options)=>{
+   const value=await original(path,options);
+   if(!lost && options?.body?.sql?.includes('AND (?=0 OR') && options.body.params[0]===phase){lost=true;throw Error('Synthetic lost D1 response');}
+   return value;
+  },{page:original.page,binary:original.binary});
+  if(phase==='complete')assert.equal((await runInstallationUpdate(f.options)).phase,phase);
+  else await assert.rejects(runInstallationUpdate(f.options),/previous code is verified/i);
+  assert.ok(lost);assert.equal((await runInstallationUpdate(f.options)).phase,phase);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM maintenance_lock').get().n,0);
+  assert.equal(f.deployments.length,phase==='complete'?1:2);
+ });
  for(const point of ['before-'+phase,phase]){
   test('restart at '+point+' finalizes once and permits writes',async t=>{
    const f=await fixture(t);f.failHealth=phase==='recovered';

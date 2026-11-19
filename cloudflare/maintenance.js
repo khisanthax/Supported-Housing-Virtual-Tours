@@ -1,9 +1,11 @@
 const $ = id => document.getElementById(id);
 const say = text => { if ($('message').textContent !== text) $('message').textContent = text; };
 const endpoint = '/api/staff/maintenance';
+let catalogLoaded=false;
 let state, publicKey, verified = false, generation = 0, selection = 0, timer, pending = false;
 async function api(suffix = '', options) {
   const response = await fetch(endpoint + suffix, options);
+  if(response.status===401||response.status===403){const error=Error('Sign in with an active Administrator account to see update progress.');error.status=response.status;throw error;}
   const value = await response.json();
   if (!response.ok) throw Error(value.error || 'Sign in again and retry.');
   return value;
@@ -54,7 +56,7 @@ $('saved').onchange=async () => {
   allowApproval();
 };
 $('confirmed').onchange=allowApproval;
-async function renderRows(rows){
+async function renderRows(rows, target='requests'){
  const boxes=[];
  for(const row of rows){
   const box=document.createElement('section'),p=document.createElement('p');
@@ -71,23 +73,45 @@ async function renderRows(rows){
   }
   boxes.push(box);
  }
- $('requests').replaceChildren(...boxes);
+ $(target).replaceChildren(...boxes);
 }
 async function refresh(){
  clearTimeout(timer);
- const {locked,request}=await api('?view=status');
+ const {locked,request,installed,companion}=await api('?view=status');
+ if(state?.installed?.build!==installed.build){catalogLoaded=false;state={installed};}
+ $('installed').textContent='Installed: '+installed.version;
+ $('technical').textContent='Build '+installed.build+' · schema '+installed.schema;
+ if(companion && new URL(companion).protocol==='https:'){$('companion').href=new URL(companion).origin;$('companion').hidden=false;}
  const active=locked || (request && !request.revoked && request.expires>Date.now() && !['complete','recovered'].includes(request.phase));
+ if(!active && !catalogLoaded){
+  state=await api();catalogLoaded=true;
+  if(state.available){$('version').textContent='Available: '+state.available.version;$('notes').textContent=state.available.notes;}
+ }
  $('handoff').hidden=!active;$('candidate').hidden=!!active||!state.available;
- if(request)await renderRows([request]);
- say(locked && ['complete','recovered'].includes(request?.phase)?'Editing is paused. Reconnect and resume this request to verify the website.':request?.revoked?'Update approval revoked.':request?.message||state.notice);
+ await renderRows(request?[request]:[]);
+ const terminal=['complete','recovered'].includes(request?.phase);
+ const expired=request && !terminal && request.expires<=Date.now();
+ const recovery=locked && (terminal || expired || request?.revoked || !request || request.phase==='operator-recovery-required');
+ $('handoff-title').textContent=recovery?'Resume installation recovery':'Authorize infrastructure access';
+ $('handoff-message').textContent=recovery?'Reconnect to the original account and installation. Resume this request to verify the website and restore editing.':'Your approval lasts two hours. Open the deployment service, reconnect to Cloudflare and choose this request for your original installation.';
+ say(recovery?'Editing is paused until the installation is verified.':request?.revoked?'Update approval revoked.':expired?'Update approval expired. Review the current release to approve a new request.':request?.message||(active?'Update approval is recorded. Open the deployment service to continue.':state.notice));
  if(active){
-  $('request').textContent='Update request: '+request.id;
+  $('request').textContent=request?'Update request: '+request.id:'Ask your authorized infrastructure operator to inspect the maintenance lock.';
   if(!document.hidden)timer=setTimeout(poll,5000);
  }
 }
-function poll(){refresh().catch(()=>{say('Progress connection interrupted. Reconnecting…');if(!document.hidden)timer=setTimeout(poll,10000);});}
+function poll(){refresh().catch(error=>{if(error.status===401||error.status===403){say(error.message);$('candidate').hidden=true;$('handoff').hidden=true;$('requests').replaceChildren();$('history').hidden=true;return;}say('Progress connection interrupted. Reconnecting…');if(!document.hidden)timer=setTimeout(poll,10000);});}
 document.addEventListener('visibilitychange',()=>{clearTimeout(timer);if(!document.hidden&&state)poll();});
-$('show-history').onclick=async()=>{try{const data=await api('?view=history');await renderRows(data.requests);for(const event of data.history){const p=document.createElement('p');p.textContent=new Date(event.created).toLocaleString()+' · '+event.event;$('requests').append(p);}}catch(e){say(e.message);}};
+$('show-history').onclick=async()=>{
+ const panel=$('history'),button=$('show-history');
+ if(!panel.hidden){panel.hidden=true;button.textContent='Show update history';button.setAttribute('aria-expanded','false');return;}
+ button.disabled=true;
+ try{
+  const data=await api('?view=history');await renderRows(data.requests,'history');
+  for(const event of data.history){const p=document.createElement('p');p.textContent=new Date(event.created).toLocaleString()+' · '+event.event;panel.append(p);}
+  panel.hidden=false;button.textContent='Hide update history';button.setAttribute('aria-expanded','true');
+ }catch(e){say(e.message);}finally{button.disabled=false;}
+};
 $('approve').onclick=async()=>{
  if(pending||!verified||!$('confirmed').checked)return;
  pending=true;allowApproval();
@@ -95,11 +119,4 @@ $('approve').onclick=async()=>{
  catch(e){say(e.message+' Refresh to check whether approval was recorded.');}
  finally{pending=false;allowApproval();}
 };
-async function start(){
- state=await api();$('installed').textContent='Installed: '+state.installed.version;
- $('technical').textContent='Build '+state.installed.build+' · schema '+state.installed.schema;
- if(state.available){$('version').textContent='Available: '+state.available.version;$('notes').textContent=state.available.notes;}
- if(state.companion && new URL(state.companion).protocol==='https:'){$('companion').href=new URL(state.companion).origin;$('companion').hidden=false;}
- await refresh();
-}
-start().catch(e=>say(e.message));
+poll();

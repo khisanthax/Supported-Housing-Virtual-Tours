@@ -45,6 +45,7 @@ export async function maintenanceApi({request,env,db,account,sessionHash,body={}
  }
  const url=new URL(request.url),path=url.pathname;
  const lock=await q('SELECT request FROM maintenance_lock WHERE id=1').first();
+ const metadata={installed,companion:env.AGENCY_COMPANION_ORIGIN??null};
  const fields='id,version,created,expires,revoked,phase,message,backup_digest,json_extract(public_key,\'$.n\') AS modulus';
  if(request.method==='GET' && url.searchParams.get('view')==='history'){
   return result({requests:(await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 50',env.INSTALLATION_ID).all()).results,history:(await q('SELECT event,created FROM maintenance_history ORDER BY id DESC LIMIT 100').all()).results});
@@ -52,7 +53,7 @@ export async function maintenanceApi({request,env,db,account,sessionHash,body={}
  if(request.method==='GET' && url.searchParams.get('view')==='status'){
   const row=lock?await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? AND id=?',env.INSTALLATION_ID,lock.request).first():
    await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 1',env.INSTALLATION_ID).first();
-  return result({locked:!!lock,request:row??null});
+  return result({...metadata,locked:!!lock,request:row??null});
  }
  let candidate=null,notice='No verified compatible update is available.';
  try{candidate=await availableUpdate(env,installed);if(candidate)notice='Review this release before approving it.';}catch{notice='The update description could not be verified. Try again later.';}

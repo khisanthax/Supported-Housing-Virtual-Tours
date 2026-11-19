@@ -4,11 +4,13 @@ const rememberedName=sessionStorage.getItem('installationName');
 if(rememberedName)$('name').value=rememberedName;
 $('name').onchange=()=>sessionStorage.setItem('installationName',$('name').value);
 history.replaceState(null,'',location.pathname);
+let mayInstall=false,submitting=false;
 const message=text=>$('message').textContent=text;
 async function state(){
  const response=await fetch('/api/state'),data=await response.json();
  $('retry-state').hidden=true;
- $('start-install').disabled=!data.freeVerificationAvailable;
+ mayInstall=!!data.freeVerificationAvailable;
+ $('start-install').disabled=!mayInstall||submitting;
  $('availability').hidden=data.freeVerificationAvailable;
  $('authorize').textContent=data.freeVerificationAvailable?'Connect to Cloudflare':'Connect for an existing installation';
  if(authOutcome==='failed')message('Cloudflare authorization did not finish. Connect again when you are ready.');
@@ -22,6 +24,10 @@ async function state(){
   message(data.error);
   $('connect').querySelector('h2').textContent='Reconnect to continue';
   $('authorize').textContent='Reconnect to Cloudflare';
+ }else if(data.sessionExpired){
+  $('connect').querySelector('h2').textContent='Cloudflare sign-in expired';
+  $('authorize').textContent='Reconnect to Cloudflare';
+  message('Reconnect and select the original account and installation name to continue.');
  }else if(authOutcome==='failed'&&!data.connected){
   $('connect').querySelector('h2').textContent='Authorization did not finish';
   $('authorize').textContent='Reconnect to Cloudflare';
@@ -38,13 +44,18 @@ async function state(){
   if(result.phase){$('next').querySelector('h2').textContent=result.phase==='complete'?'Update complete':'Previous code recovered';$('next').querySelector('p').textContent='Your existing accounts and apartment data are retained. Open your website, or reconnect below to download the encrypted installation backup and review update history.';$('setup-expiry').hidden=true;$('reconnect').hidden=false;}
   $('open').href=result.website+(result.ready||result.phase?'/staff':'/setup#'+result.ticket);
   $('open').textContent=result.ready?'Sign in':result.phase?'Open LevelTwo360':'Continue agency setup';
+  if(!result.ready&&!result.phase&&result.expires<=Date.now()){
+   $('next').querySelector('h2').textContent='Your setup link has expired';
+   $('next').querySelector('p').textContent='Reconnect with the original Cloudflare account and installation name to finish setup.';
+   $('setup-expiry').hidden=true;$('open').href='/oauth/start';$('open').textContent='Reconnect to Cloudflare';
+  }
   $('revocation').textContent=result.revoked?'The temporary Cloudflare deployment token has been revoked.':'The deployment service discarded its token but could not confirm revocation. Revoke this application in Cloudflare’s authorized applications before continuing.';
   $('open').focus();message('');
  }
 }
 $('deploy').onsubmit=async event=>{
- event.preventDefault();const button=event.submitter;button.disabled=true;
- try{const r=await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:$('account').value,name:$('name').value,freeConfirmed:$('free').checked})});const data=await r.json();if(!r.ok)message(data.error);else await state();}catch{message('Connection interrupted. Refresh to check setup before retrying.');}finally{button.disabled=false;}
+ event.preventDefault();if(submitting||!mayInstall)return;submitting=true;const button=$('start-install');button.disabled=true;
+ try{const r=await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:$('account').value,name:$('name').value,freeConfirmed:$('free').checked})});const data=await r.json();if(!r.ok)message(data.error);else await state();}catch{message('Connection interrupted. Refresh to check setup before retrying.');}finally{submitting=false;button.disabled=!mayInstall;}
 };
 $('disconnect').onclick=async()=>{clearTimeout(timer);const r=await fetch('/api/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await r.json();if(!r.ok){message(data.error);return;}location.reload();};
 $('account').onchange=()=>{sessionStorage.setItem('installationAccount',$('account').value);$('updates').hidden=true;};

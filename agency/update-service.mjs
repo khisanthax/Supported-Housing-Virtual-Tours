@@ -52,7 +52,10 @@ export async function runInstallationUpdate({account,name,directory,requestId,ap
  const candidate=terminal.has(request.phase)?null:verifiedUpdate({...releaseBundle,installed});
  if(candidate && (request.manifest_digest!==candidate.manifestSha256||request.version!==candidate.version||sha256(releaseBundle.artifact)!==candidate.artifactSha256))throw new SetupError('The approved release or its artifact changed. A new Administrator review is required.');
  const authorize=async()=>{const row=await get();const admin=(await query("SELECT revision FROM staff_accounts WHERE username=? AND role='administrator' AND disabled=0",[row?.administrator]))[0];if(!row||row.revoked||row.expires<=Date.now()||admin?.revision!==row.revision||row.from_build!==request.from_build)throw new SetupError('Update approval expired, was revoked, or its Administrator changed.');return row;};
- const setPhase=async phase=>{request.phase=phase;await query('UPDATE maintenance_requests SET phase=?,message=? WHERE id=?',[phase,phaseMessage[phase],requestId]);await query('INSERT INTO maintenance_history(request,actor,event,created) VALUES(?,?,?,?)',[requestId,'infrastructure',phaseMessage[phase],Date.now()]);progress(phaseMessage[phase]);await saveJournal(journalPath,journal);await checkpoint(phase);};
+ const setPhase=async phase=>{
+  const rows=await query('UPDATE maintenance_requests SET phase=?,message=? WHERE id=? AND EXISTS(SELECT 1 FROM maintenance_lock WHERE id=1 AND request=?) RETURNING id',[phase,phaseMessage[phase],requestId,requestId]);
+  if(!rows.length)throw new SetupError('This request no longer owns the maintenance lock. Check its current status.');
+  request.phase=phase;await query('INSERT INTO maintenance_history(request,actor,event,created) VALUES(?,?,?,?)',[requestId,'infrastructure',phaseMessage[phase],Date.now()]);progress(phaseMessage[phase]);await saveJournal(journalPath,journal);await checkpoint(phase);};
  // A single guarded UPDATE fires both the history insert and lock release in
  // the same SQLite transaction. Install on demand for older agency schemas.
  const finish = async (phase, repair = false) => {
@@ -74,11 +77,18 @@ export async function runInstallationUpdate({account,name,directory,requestId,ap
    END`);
   await checkpoint('before-'+phase);
   const requireApproval = phase==='complete' && !repair;
-  const rows = await query(`UPDATE maintenance_requests SET phase=?,message=? WHERE id=? AND installation=?
+  let rows;
+  try{rows = await query(`UPDATE maintenance_requests SET phase=?,message=? WHERE id=? AND installation=?
    AND EXISTS(SELECT 1 FROM maintenance_lock WHERE id=1 AND request=?)
    AND (?=0 OR (revoked IS NULL AND expires>? AND EXISTS(SELECT 1 FROM staff_accounts
     WHERE username=administrator AND staff_accounts.revision=maintenance_requests.revision AND role='administrator' AND disabled=0))) RETURNING id`,
    [phase,phaseMessage[phase],requestId,state.installation,requestId,Number(requireApproval),Date.now()]);
+  }catch(error){
+   // The provider may commit the transaction before its HTTP response is lost.
+   const committed=await query('SELECT id FROM maintenance_requests WHERE id=? AND installation=? AND phase=? AND NOT EXISTS(SELECT 1 FROM maintenance_lock WHERE id=1 AND request=?)',[requestId,state.installation,phase,requestId]);
+   if(!committed.length)throw error;
+   rows=committed;
+  }
   if (!rows.length) throw new SetupError('The lock or approval changed. Review the request before continuing.');
   progress(phaseMessage[phase]);
   await checkpoint(phase);

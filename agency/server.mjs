@@ -1,9 +1,9 @@
+import {pipeline} from 'node:stream/promises';
 import {createServer} from 'node:http';
 import {randomBytes,createHash,createPublicKey,verify} from 'node:crypto';
-import {readFile,mkdir,rmdir} from 'node:fs/promises';
+import {readFile,mkdir,rmdir,open} from 'node:fs/promises';
 import {join,resolve,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createReadStream} from 'node:fs';
 import {cloudflareApi,provision,wranglerRunner,identifier,installationName,SetupError} from './cloudflare.mjs';
 import {readUpdateRequests,runInstallationUpdate,installationQueries} from './update-service.mjs';
 
@@ -39,7 +39,9 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
    if(req.method==='GET'&&['/','/wizard.js','/wizard.css'].includes(url.pathname)){
     const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
     const content=await readFile(new URL('./'+name,import.meta.url));
-    res.writeHead(200,{...headers,'Content-Type':name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8'});res.end(content);return;
+    // Native same-origin form navigation needs an Origin header. OAuth callbacks
+    // and credential-bearing responses keep their stricter no-referrer policy.
+    res.writeHead(200,{...headers,...(name==='index.html'?{'Referrer-Policy':'same-origin'}:{}),'Content-Type':name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8'});res.end(content);return;
    }
    if(req.method==='GET'&&url.pathname==='/oauth/start'){
     const ip=req.socket.remoteAddress??'unknown',limit=starts.get(ip)??{count:0,until:now()+60000};
@@ -70,7 +72,7 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
     const next=random();sessions.delete(digest(token));sessions.set(digest(next),s);
     return redirect(res,'/',{'Set-Cookie':cookie(next)});
    }
-   if(url.pathname==='/api/state'&&req.method==='GET')return send(res,200,{connected:!!s?.accessToken,accounts:s?.accounts?.map(a=>({id:a.id,name:a.name}))??[],running:!!s?.running,progress:s?.progress??'',error:s?.error??'',result:s?.result??null,updateRequests:s?.updateRequests??[],updatesConfigured:!!releaseBundle,freeVerificationAvailable:verifiedFreePlanIds.length>0});
+   if(url.pathname==='/api/state'&&req.method==='GET')return send(res,200,{connected:!!s?.accessToken,sessionExpired:!!token&&!s,accounts:s?.accounts?.map(a=>({id:a.id,name:a.name}))??[],running:!!s?.running,progress:s?.progress??'',error:s?.error??'',result:s?.result??null,updatesConfigured:!!releaseBundle,freeVerificationAvailable:verifiedFreePlanIds.length>0});
    if(req.method==='POST'&&url.pathname.startsWith('/api/')){
     const downloadForm=url.pathname==='/api/updates/backup' && req.headers['content-type']?.split(';')[0]==='application/x-www-form-urlencoded';
     if(req.headers.origin!==origin||(!downloadForm && req.headers['content-type']!=='application/json'))return send(res,403,{error:'Use the deployment form on this website.'});
@@ -81,15 +83,29 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
      if(!identifier.test(account)||!s.accounts?.some(a=>a.id===account)||!installationName.test(name))return send(res,403,{error:'Select an authorized account and original installation name.'});
      const directory=join(stateDirectory,account,name),api=apiFactory(s.accessToken,fetcher);
      if(url.pathname==='/api/updates/list'){
-      const found=await readUpdateRequests({directory,api});if(found.state.account!==account||found.state.name!==name)return send(res,403,{error:'Installation identity mismatch.'});s.updateRequests=found.requests;return send(res,200,{requests:found.requests});
+      const found=await readUpdateRequests({directory,api});if(found.state.account!==account||found.state.name!==name)return send(res,403,{error:'Installation identity mismatch.'});return send(res,200,{requests:found.requests});
      }
      if(!/^[a-f0-9]{32}$/.test(requestId??''))return send(res,400,{error:'Select an update request.'});
      if(url.pathname==='/api/updates/backup'){
       const state=JSON.parse(await readFile(join(directory,'installation.json'),'utf8'));if(state.account!==account||state.name!==name)return send(res,403,{error:'Installation identity mismatch.'});
       const query=installationQueries(api,state),row=(await query('SELECT backup_digest,backup_file FROM maintenance_requests WHERE id=? AND installation=?',[requestId,state.installation]))[0];
       if(!row?.backup_digest||!/^snapshot-[a-f0-9]{16}\.lt360backup$/.test(row.backup_file??''))return send(res,404,{error:'A verified encrypted backup is not available.'});
-      const path=join(directory,'updates',requestId,row.backup_file),hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);if(hash.digest('hex')!==row.backup_digest)return send(res,409,{error:'Backup integrity could not be verified. Ask an authorized infrastructure operator to review it.'});
-      res.writeHead(200,{...headers,'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"','X-Backup-SHA256':row.backup_digest});const stream=createReadStream(path);res.once('close',()=>stream.destroy());stream.on('error',()=>res.destroy()).pipe(res);return;
+      const file=await open(join(directory,'updates',requestId,row.backup_file),'r');
+      try{
+       const hash=createHash('sha256');
+       for await(const chunk of file.createReadStream({start:0,autoClose:false})){
+        if(res.destroyed)return;
+        hash.update(chunk);
+       }
+       if(hash.digest('hex')!==row.backup_digest)return send(res,409,{error:'Backup integrity could not be verified. Ask an authorized infrastructure operator to review it.'});
+       if(!s.accessToken||s.deadline<=now())return send(res,401,{error:'Reconnect to Cloudflare to download this backup.'});
+       const size=(await file.stat()).size;
+       res.writeHead(200,{...headers,'Content-Type':'application/octet-stream','Content-Length':size,'Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"','X-Backup-SHA256':row.backup_digest});
+       const stream=file.createReadStream({start:0,autoClose:false});
+       await pipeline(stream,res);return;
+      }catch(error){if(res.headersSent||res.destroyed){res.destroy();return;}throw error;}
+      finally{await file.close();}
+
      }
      if(url.pathname==='/api/updates/start'){
       // A stranded terminal request can be reconciled from its verified deployment and journal even if the catalog changed.

@@ -2,33 +2,41 @@ const $=id=>document.getElementById(id);
 // Remove the fragment before any request. Never persist the bootstrap credential.
 let ticket=location.hash.slice(1);history.replaceState(null,'',location.pathname);
 $('website').textContent='Your website: '+location.origin;
-if(!/^[A-Za-z0-9_-]{43}$/.test(ticket)){$('setup').hidden=true;$('message').textContent='Return to the deployment wizard to authorize setup, or open /staff if your Administrator account already exists.';}
-async function resume(){
- $('setup').hidden=true;$('resume').hidden=false;
- const health=await fetch('/api/installation-health').then(r=>r.json()).catch(()=>({}));
+async function resume(expired=false){
+ $('setup').hidden=true;$('resume').hidden=true;$('intro-copy').hidden=true;
+ $('check').hidden=true;
+ let health;
+ try{const response=await fetch('/api/installation-health');health=await response.json();if(!response.ok && !health.companion)throw Error();}
+ catch{
+  $('intro').querySelector('h1').textContent='Check your installation';
+  $('message').textContent='The website could not confirm whether setup finished. Check your connection and try again.';
+  $('check').hidden=false;$('check').onclick=()=>resume(expired);$('check').focus();return;
+ }
  if(health.ready){
   $('intro').querySelector('h1').textContent='Your installation is ready';
   $('message').textContent='Sign in with your existing agency account.';
+  $('resume-link').href='/staff';$('resume-link').textContent='Sign in';$('resume').hidden=false;
  }else{
-  $('intro').querySelector('h1').textContent='Reconnect to finish setup';
+  $('intro').querySelector('h1').textContent=expired?'Your setup link has expired or changed':'Reconnect to finish setup';
   $('message').textContent='Reopen your original deployment invitation and choose the same installation to get a fresh setup link.';
   if(health.companion && new URL(health.companion).protocol==='https:'){
-   $('resume-link').href=new URL(health.companion).origin;$('resume-link').textContent='Return to deployment wizard';
+   $('resume-link').href=new URL(health.companion).origin;$('resume-link').textContent='Return to deployment wizard';$('resume').hidden=false;
   }else $('resume').hidden=true;
  }
+ if(!$('resume').hidden)$('resume-link').focus();
 }
 if(!/^[A-Za-z0-9_-]{43}$/.test(ticket))resume();
 let summary='';
 $('setup').addEventListener('submit',async event=>{
- event.preventDefault();const button=event.submitter;
+ event.preventDefault();const button=$('setup').querySelector('button');if(button.disabled)return;
  if($('password').value!==$('confirmation').value){$('message').textContent='The passwords do not match.';return;}
  button.disabled=true;$('message').textContent='Creating your Administrator account…';
  try{
   const r=await fetch('/api/agency-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket,username:$('username').value,password:$('password').value})});
   const data=await r.json();
-  if(!r.ok){if(data.complete||r.status===403){ticket='';await resume();return;}$('message').textContent=data.error;return;}
+  if(!r.ok){if(data.complete||r.status===403){ticket='';await resume(r.status===403);return;}$('message').textContent=data.error;return;}
   ticket='';$('setup').reset();$('setup').hidden=true;$('intro').hidden=true;$('message').textContent='';$('success').hidden=false;
-  $('address').textContent=data.website;
+  $('address').textContent=data.website;$('success').querySelector('a').focus();
   summary=`LevelTwo360 setup summary\nWebsite: ${data.website}\nAdministrator username: ${data.username}\nVersion: ${data.version}\nCompleted: ${new Date().toISOString()}\n\nSign in at ${data.website}/staff\nCreate accounts in Manage staff accounts. Assign permissions and apartment access.\nKeep encrypted apartment backups and store their passwords separately.\nHelp: ${data.website}/staff/help\nSupport: use Diagnostics; never share passwords or Cloudflare credentials.\nThis summary contains no passwords or deployment credentials.\n`;
  }catch{$('message').textContent='The connection was interrupted. Retry with the same details. If setup already completed, sign in at /staff. Your existing Administrator will never be reset.';}
  finally{$('password').value='';$('confirmation').value='';button.disabled=false;}

@@ -77,3 +77,5 @@ The screenshots use a synthetic agency and localhost infrastructure adapters. Th
 ![Recorded update approval](docs/agency/06-update-approved.png)
 
 Publisher deployment and acceptance requirements: [agency/README.md](agency/README.md). Invitation draft: [agency/INVITATION.txt](agency/INVITATION.txt).
+
+If your Administrator setup link expires, use **Return to deployment wizard** or reopen your original invitation. Reconnect to the same account and installation name. If setup already finished, the agency website offers **Sign in**. On **Software updates**, an expired approval requires a new review. If editing is paused, use **Resume installation recovery** to reopen the original request. You can cancel an encrypted backup download in your browser and download the same verified backup again after reconnecting.
