@@ -1,5 +1,7 @@
 # Isolated Capture Room experiment
 
+Testing-only backup option: on the isolated capture-test website, choose Export Backup, select **Testing only: ZIP without a passphrase**, then Continue. Encrypted export remains the default. Plain exports are named UNENCRYPTED and contain readable apartment.shtour data; keep them private. The test website can restore them directly. Other editions can import the extracted apartment.shtour through legacy import. This option is injected only into the isolated capture build; production backup exports are unchanged. Export original captures (local ZIP) already requires no passphrase.
+
 ## Physical rotation report: recovery and full-viewport revision
 
 The owner reported a Fold 7 failure when upward aiming caused screen rotation. Investigation found reproducible code defects: the opening screen angle was treated as immutable, camera restart rejected other angles/aspect shapes, and the untracked fallback projected the target at the crosshair centre. Saved photos were intact, but selecting dots could not restore tracking/calibration. These explain the simulated failure paths; they do not prove the exact sequence of physical sensor events on that phone.

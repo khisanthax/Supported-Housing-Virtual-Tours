@@ -12,6 +12,9 @@ files.set('/capture/vendor/opencv.js',Buffer.from('// UMD global receiver adapte
 files.set('/capture/vendor/OpenCV-LICENSE.txt',await readFile(new URL('../node_modules/@techstark/opencv-js/LICENSE',import.meta.url)));
 for(const [p,b] of files)if(p.endsWith('.html'))files.set(p,Buffer.from(b.toString().replace("script-src 'self';","script-src 'self' 'wasm-unsafe-eval';")));
 const runtime=files.get('/dist/editor-runtime.js').toString();
+files.set('/dist/backup-ui-secure.js',files.get('/dist/backup-ui.js'));
+files.set('/dist/backup-ui.js',await readFile(new URL('./test-backup-ui.js',import.meta.url)));
+files.set('/dist/guided-editor.js',Buffer.from(files.get('/dist/guided-editor.js').toString().replace('Encrypted backup download started.','Backup download started.')));
 files.set('/dist/editor-runtime.js',Buffer.from("import {captureRoom} from '/capture/ui.js';\n"+runtime.replace('export default { edition, storage, getAccess, can, applyAccess };',"export default { edition, storage, getAccess, can, applyAccess, captureRoom: options=>captureRoom({...options,syntheticBench:true}) };")));
 files.set('/editor/index.html',Buffer.from(files.get('/editor/index.html').toString().replace('<head>','<head><link rel="stylesheet" href="/capture/style.css">').replace('LOCAL ONLY','LOCAL CAPTURE PROTOTYPE — NOT PRODUCTION')));
 const hashes=Object.fromEntries([...files].map(([p,b])=>[p,createHash('sha256').update(b).digest('base64')]));
