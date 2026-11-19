@@ -1,6 +1,6 @@
 # Supported Housing Virtual Tours
 
-LevelTwo360 [agency browser setup preview](AGENCY-SETUP.md): Phase 1 implementation and isolated tests are in progress. Public deployment and the complete safe updater are not released; Phase 2 support access has not started.
+LevelTwo360 [agency browser setup preview](AGENCY-SETUP.md): Phase 1 implementation and isolated tests are in progress. The safe updater is implemented and locally tested; public deployment remains blocked by Cloudflare Free-plan permission/acceptance gates. Phase 2 support access has not started.
 
 An interactive 360° apartment viewer and staff-managed tour catalog. The public source contains synthetic fixtures for testing.
 

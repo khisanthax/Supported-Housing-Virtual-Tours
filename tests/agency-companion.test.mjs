@@ -10,7 +10,8 @@ const account='a'.repeat(32),other='b'.repeat(32);
 const free=[{price:0,state:'Provisioned',rate_plan:{id:'synthetic-workers-free',scope:'workers'}}];
 
 test('provisioning suppresses Wrangler disk/debug outputs and cannot inherit developer fallback credentials or an alternate API destination',()=>{
- const env=provisioningEnvironment({token:'synthetic-agency-token',account},{CLOUDFLARE_API_KEY:'synthetic-unwanted',CF_API_TOKEN:'synthetic-unwanted',WRANGLER_WRITE_LOGS:'true',WRANGLER_LOG_SANITIZE:'false',WRANGLER_LOG:'debug',WRANGLER_OUTPUT_FILE_PATH:'unwanted-file',CLOUDFLARE_API_BASE_URL:'https://unwanted.example'});
+ const env=provisioningEnvironment({token:'synthetic-agency-token',account},{AGENCY_OAUTH_CLIENT_SECRET:'synthetic-publisher-secret',CLOUDFLARE_API_KEY:'synthetic-unwanted',CF_API_TOKEN:'synthetic-unwanted',WRANGLER_WRITE_LOGS:'true',WRANGLER_LOG_SANITIZE:'false',WRANGLER_LOG:'debug',WRANGLER_OUTPUT_FILE_PATH:'unwanted-file',CLOUDFLARE_API_BASE_URL:'https://unwanted.example'});
+ assert.equal(env.AGENCY_OAUTH_CLIENT_SECRET,undefined);
  assert.equal(env.CLOUDFLARE_API_TOKEN,'synthetic-agency-token');assert.equal(env.CLOUDFLARE_ACCOUNT_ID,account);assert.equal(env.CLOUDFLARE_API_BASE_URL,'https://api.cloudflare.com/client/v4');assert.equal(env.WRANGLER_WRITE_LOGS,'false');assert.equal(env.WRANGLER_LOG_SANITIZE,'true');assert.equal(env.WRANGLER_LOG,'error');assert.equal(env.CLOUDFLARE_API_KEY,undefined);assert.equal(env.CF_API_TOKEN,undefined);assert.equal(env.WRANGLER_OUTPUT_FILE_PATH,undefined);
 });
 
@@ -20,7 +21,7 @@ test('free-plan preflight rejects empty, ambiguous, paid, trial and zone-Free ev
  assert.equal(freePlan(free,[]),false);
 });
 
-async function companion(t,{deploy=async()=>({ready:true,website:'https://synthetic.example.workers.dev'}),expires=600,clock=()=>Date.now()}={}){
+async function companion(t,{deploy=async()=>({ready:true,website:'https://synthetic.example.workers.dev'}),expires=600,clock=()=>Date.now(),...serviceOptions}={}){
  let origin='',exchange=0,revocations=0;
  const fetcher=async(url,options)=>{
   if(url.endsWith('/token')){exchange++;const body=new URLSearchParams(options.body);assert.ok(body.get('code_verifier'));assert.equal(body.get('redirect_uri'),origin+'/oauth/callback');return Response.json({access_token:'synthetic-oauth-secret',expires_in:expires,refresh_token:'must-not-retain'});}
@@ -29,7 +30,7 @@ async function companion(t,{deploy=async()=>({ready:true,website:'https://synthe
  };
  // Reserve an ephemeral port, then construct exact-origin OAuth configuration.
  const {createServer}=await import('node:http');const probe=createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));origin='http://127.0.0.1:'+port;
- const server=createCompanion({origin,clientId:'synthetic-client',clientSecret:'synthetic-client-secret',scopes:'synthetic-scope',stateDirectory:join(tmpdir(),'unused-companion-test'),build:'synthetic-build',verifiedFreePlanIds:['synthetic-workers-free'],fetcher,deploy,apiFactory:token=>async path=>{assert.equal(token,'synthetic-oauth-secret');assert.equal(path,'/accounts?per_page=50');return [{id:account,name:'Synthetic agency'}];},runnerFactory:()=>()=>{},now:clock});
+ const server=createCompanion({origin,clientId:'synthetic-client',clientSecret:'synthetic-client-secret',scopes:'synthetic-scope',stateDirectory:join(tmpdir(),'unused-companion-test'),build:'synthetic-build',verifiedFreePlanIds:['synthetic-workers-free'],fetcher,deploy,apiFactory:token=>async path=>{assert.equal(token,'synthetic-oauth-secret');assert.equal(path,'/accounts?per_page=50');return [{id:account,name:'Synthetic agency'}];},runnerFactory:()=>()=>{},now:clock,...serviceOptions});
  await new Promise(r=>server.listen(port,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
  const request=(path,{cookie='',body,method=body?'POST':'GET',requestOrigin=origin}={})=>fetch(origin+path,{method,redirect:'manual',headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  const begin=async()=>{const r=await request('/oauth/start');assert.equal(r.status,303);const auth=new URL(r.headers.get('Location'));assert.equal(auth.origin,'https://dash.cloudflare.com');assert.equal(auth.searchParams.get('code_challenge_method'),'S256');assert.ok(!auth.search.includes('client_secret'));return {cookie:r.headers.get('Set-Cookie').split(';')[0],state:auth.searchParams.get('state')};};
@@ -102,10 +103,32 @@ test('provisioning retries interrupted storage creation, keeps independent bindi
  const journal=await readFile(join(directory,'installation.json'),'utf8');assert.ok(!journal.includes(result.ticket));
  const config=JSON.parse(await readFile(join(directory,'wrangler.json'),'utf8'));assert.equal(config.account_id,account);assert.equal(config.kv_namespaces[0].id,'c'.repeat(32));assert.equal(config.vars.AGENCY_BROWSER_SETUP,'1');assert.equal(config.observability.logs.enabled,false);
  const again=await provision(options);assert.notEqual(again.ticket,result.ticket);assert.equal(databases.length,1);assert.equal(namespaces.length,1);assert.equal(secrets.length,1);
+ for(const stage of ['schema','secret inventory','deployment','network'])await t.test('resume after interrupted '+stage,async()=>{
+  let failed=false,healthCalls=0;
+  const interrupted={...options,run:async(args,stdin)=>{if(!failed&&((stage==='schema'&&args[0]==='d1')||(stage==='secret inventory'&&args[0]==='secret'&&args[1]==='list')||(stage==='deployment'&&args[0]==='deploy'))){failed=true;throw new SetupError('Synthetic interrupted '+stage);}return run(args,stdin);},fetcher:async()=>{healthCalls++;if(stage==='network'&&healthCalls===2){failed=true;throw new SetupError('Synthetic interrupted network');}return fetcher();}};
+  await assert.rejects(provision(interrupted),/interrupted/);assert.equal(failed,true);const healed=await provision(options);assert.match(healed.ticket,/^[A-Za-z0-9_-]{43}$/);assert.equal(databases.length,1);assert.equal(namespaces.length,1);assert.equal(secrets.length,1);assert.equal(database.prepare('SELECT COUNT(*) n FROM staff_accounts').get().n,0);
+ });
+ await t.test('a foreign Worker identity is never adopted',async()=>{await assert.rejects(provision({...options,api:async(path,opt)=>path.includes('/settings')?{bindings:[{name:'INSTALLATION_ID',text:'f'.repeat(32)}]}:api(path,opt)}),/will not be overwritten/);assert.equal(databases.length,1);assert.equal(namespaces.length,1);});
  database.prepare("INSERT INTO staff_accounts(username,password_verifier,role) VALUES('existing','retained-verifier','administrator')").run();
  const before=deploys;assert.equal((await provision(options)).ready,true);assert.equal(deploys,before);assert.equal(database.prepare('SELECT password_verifier FROM staff_accounts').get().password_verifier,'retained-verifier');
+ await t.test('unhealthy initialized install is not migrated, reset or redeployed',async()=>{const previous=await readFile(join(directory,'wrangler.json'));await assert.rejects(provision({...options,fetcher:async()=>Response.json({prepared:false,ready:false,schema:4}),run:()=>assert.fail('Existing installation must not be mutated')}),/No migration or deployment/);assert.deepEqual(await readFile(join(directory,'wrangler.json')),previous);assert.equal(database.prepare('SELECT password_verifier FROM staff_accounts').get().password_verifier,'retained-verifier');});
 });
 
 test('failed Free preflight performs no provisioning mutations',async()=>{
  const calls=[];await assert.rejects(provision({account,name:'synthetic-agency',directory:'unused',build:'synthetic',verifiedFreePlanIds:[],api:async path=>{calls.push(path);return free;},run:()=>assert.fail('No command may run')}),/could not be verified/);assert.deepEqual(calls,[`/accounts/${account}/subscriptions`]);
+});
+
+test('connected update entry point checks account scope, serializes jobs, revokes authorization and protects backup downloads',async t=>{
+ const {mkdir,writeFile}=await import('node:fs/promises'),{createHash}=await import('node:crypto');
+ const dir=await mkdtemp(join(tmpdir(),'lt360-companion-update-'));t.after(()=>rm(dir,{recursive:true,force:true}));const id='d'.repeat(32),install='f'.repeat(32),name='synthetic-agency',directory=join(dir,account,name),file='snapshot-'+'1'.repeat(16)+'.lt360backup',content=Buffer.from('Synthetic encrypted snapshot fixture');await mkdir(join(directory,'updates',id),{recursive:true});await writeFile(join(directory,'installation.json'),JSON.stringify({account,name,installation:install,database:'synthetic-db'}));await writeFile(join(directory,'updates',id,file),content);
+ let releaseJob;const gate=new Promise(r=>releaseJob=r);let calls=0;
+ const f=await companion(t,{stateDirectory:dir,releaseBundle:{bytes:Buffer.from('{}'),signature:Buffer.alloc(64)},apiFactory:()=>async(path,opt)=>{if(path==='/accounts?per_page=50')return [{id:account,name:'Synthetic agency'}];assert.match(path,/synthetic-db\/query$/);assert.equal(opt.body.params.at(-1),install);return [{success:true,results:opt.body.sql.includes('backup_file')?[{backup_file:file,backup_digest:createHash('sha256').update(content).digest('hex')}]:[{id,version:'0.2.1',phase:'approved'}]}];},updater:async options=>{calls++;assert.equal(options.directory,directory);assert.equal(options.requestId,id);await gate;return {phase:'complete',website:'https://synthetic.example.workers.dev',requestId:id,backupAvailable:true};}});
+ const cookie=await f.connect(),body={account,name,requestId:id};
+ assert.equal((await f.request('/api/updates/start',{cookie,body:{...body,account:other}})).status,403);
+ assert.equal((await f.request('/api/updates/list',{cookie,body})).status,200);
+ assert.equal((await f.request('/api/updates/backup',{cookie,body})).status,200);
+ assert.equal((await f.request('/api/updates/backup?token=anything')).status,404);
+ assert.equal((await f.request('/api/updates/start',{cookie,body})).status,202);assert.equal((await f.request('/api/updates/start',{cookie,body})).status,409);assert.equal(calls,1);releaseJob();
+ for(let i=0;i<20;i++){if(!(await(await f.request('/api/state',{cookie})).json()).running)break;await new Promise(r=>setTimeout(r,5));}
+ assert.equal((await(await f.request('/api/state',{cookie})).json()).result.revoked,true);assert.equal((await f.request('/api/updates/backup',{cookie,body})).status,401);
 });

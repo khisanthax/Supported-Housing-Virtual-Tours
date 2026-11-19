@@ -1,5 +1,6 @@
 import {release} from './release.mjs';
 import {agencySetup} from './agency-setup.mjs';
+import {maintenanceApi,maintenanceReady} from './maintenance.mjs';
 import {createDiagnostic,storeDiagnostic,diagnosticQuery,validateClientEvents,newTrace,tracePattern} from './diagnostics.mjs';
 import { uploadsApi } from './uploads-api.mjs';
 import { assertAdditiveUpload } from '../dist/uploads-data.js';
@@ -121,10 +122,15 @@ async function handleRequest(request,env,privateStaffOnly=false) {
     }catch{return output({error:'Setup is temporarily unavailable. Return to the deployment wizard and retry; existing accounts are preserved.'},503);}
   }
   const diagPath=new URL(request.url).pathname;
-  const diagnostic=env.DIAGNOSTICS_ENABLED==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version)/.test(diagPath)?createDiagnostic(request,env):null;
+  let maintaining=false;
+  if(env.AGENCY_BROWSER_SETUP==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&diagPath.startsWith('/api/')){
+    try{maintaining=!!await env.DB.withSession('first-primary').prepare('SELECT request FROM maintenance_lock WHERE id=1').bind().first();}catch{}
+    if(maintaining&&!['GET','HEAD'].includes(request.method)&&!['/api/staff/maintenance','/api/staff/sign-in','/api/staff/sign-out'].includes(diagPath))return output({error:'An approved software update is in progress. Editing and guest sign-in will return after verification or recovery.'},503,{'Retry-After':'30'});
+  }
+  const diagnostic=!maintaining&&env.DIAGNOSTICS_ENABLED==='1'&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&new URL(request.url).origin!==passwordWorkOrigin&&diagPath.startsWith('/api/')&&!/\/api\/staff\/(events|version|maintenance)/.test(diagPath)?createDiagnostic(request,env):null;
   if(diagnostic){request=new Request(request);request.headers.set('X-Operation-ID',diagnostic.operation);}
   const finish=async(response,error)=>{if(!diagnostic)return response;const d=diagnostic.finish(response.status,error);if((privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object')&&!(request.method==='GET'&&response.ok&&/\/images\//.test(diagPath)&&parseInt(d.span.slice(-2),16)>=26)&&!(diagPath==='/api/staff/diagnostics'&&response.status<400))try{await storeDiagnostic(env.DB.withSession('first-primary'),d);}catch{}const h=new Headers(response.headers);h.set('X-Operation-ID',diagnostic.operation);if(response.status>=400&&!h.has('X-Error-Code'))h.set('X-Error-Code',d.code);return new Response(response.body,{status:response.status,headers:h});};
-  const auditEnabled=env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
+  const auditEnabled=!maintaining&&env.TOUR_UAC==='1'&&new URL(request.url).origin!==passwordWorkOrigin&&(privateStaffOnly||env.TOUR_API_BACKEND!=='durable-object');
   const envelope=auditEnabled?await activityEnvelope(request):null;
   if(diagnostic&&envelope){diagnostic.action=envelope.action;diagnostic.requestedScope=envelope.scope;diagnostic.requestedExpires=envelope.expires;markDiagnosticResource(diagnostic,envelope);if(envelope.action.startsWith('backup'))diagnostic.category='backup';}
   if(envelope?.action==='staff.sign-in'&&envelope.username){try{const table=env.STAFF_AUTH_MODE==='password'?'staff_accounts':'firebase_staff_accounts';const known=await env.DB.withSession('first-primary').prepare('SELECT username FROM '+table+' WHERE username=?').bind(envelope.username).first();if(!known)envelope.username=null;}catch{envelope.username=null;}}
@@ -141,6 +147,7 @@ async function handleRequest(request,env,privateStaffOnly=false) {
     return finish(response);
   }
   catch (error) {
+    if(String(error.message??'').includes('LT360_MAINTENANCE'))return output({error:'A software update is in progress. This change was not committed. Retry after verification or recovery.'},503,{'Retry-After':'30'});
     if(diagnostic&&envelope)diagnostic.actor=envelope.actor??(envelope.action==='staff.sign-in'&&envelope.username?'sign-in:'+envelope.username:diagnostic.actor);
     if(envelope&&diagnostic?.share)envelope.resource??=diagnostic.share;
     markDiagnosticResource(diagnostic,envelope);
@@ -178,8 +185,10 @@ async function route(request,env,privateStaffOnly,diag=null) {
     const setup=await env.DB.withSession('first-primary').prepare('SELECT completed FROM agency_setup WHERE id=1').bind().first();
     if(method==='GET'&&path==='/api/installation-health'){
       const ledger=await env.DB.withSession('first-primary').prepare('SELECT COUNT(*) n,MIN(version) minimum,MAX(version) maximum FROM app_migrations').bind().first();
-      const prepared=ledger.n===release.schema&&ledger.minimum===1&&ledger.maximum===release.schema&&typeof env.PHOTOS?.get==='function'&&typeof env.STAFF_LOGIN?.getByName==='function';
-      return output({prepared,ready:prepared&&!!setup?.completed,version:release.version,schema:ledger.maximum??0});
+      const maximum=Number(env.SCHEMA_COMPATIBLE_MAX??release.schema);
+      const recoveryReady=await maintenanceReady(env.DB.withSession('first-primary'));
+      const prepared=recoveryReady&&ledger.n===ledger.maximum&&ledger.minimum===1&&ledger.maximum>=release.schema&&ledger.maximum<=maximum&&typeof env.PHOTOS?.get==='function'&&typeof env.STAFF_LOGIN?.getByName==='function';
+      return output({prepared,ready:prepared&&!!setup?.completed,maintenanceProtocol:recoveryReady?1:0,version:release.version,build:env.APP_BUILD??release.version,schema:ledger.maximum??0});
     }
     if(!setup?.completed)fail(503,'Agency setup is not complete. Return to the deployment wizard to finish.');
   }
@@ -290,6 +299,11 @@ async function route(request,env,privateStaffOnly,diag=null) {
   }
   if (method==='GET' && path==='/') return Response.redirect(new URL('/staff',url),302);
   if (method==='GET' && path==='/staff') return asset(await staff()?'/sharing/gallery.html':'/sharing/staff-login.html');
+  if(method==='GET'&&['/staff/updates','/sharing/maintenance.js'].includes(path)){
+    const a=await staff();if(!a)return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});
+    if(a.role!=='administrator'||env.AGENCY_BROWSER_SETUP!=='1')fail(403,'Administrator access to an agency installation is required.');
+    return asset(path==='/staff/updates'?'/sharing/maintenance.html':path);
+  }
   if (method==='GET' && path==='/staff/guest-links') { if(!await staff()) return new Response(null,{status:303,headers:{...headers,Location:'/staff'}}); if(env.TOUR_UAC==='1'){const p=await createPolicyStore(db).principal(await staff());if(!effectivePermission(p,'invitation.view').allowed&&!effectivePermission(p,'invitation.create').allowed)fail(403,'Invitation access denied.');} return asset('/sharing/staff.html'); }
   if(method==='GET'&&['/staff/migration','/staff/help'].includes(path)){const a=await staff();if(!a)return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});if(path==='/staff/migration'){const p=await createPolicyStore(db).principal(a);for(const key of ['backup.import','apartment.create','image.upload'])if(!effectivePermission(p,key).allowed)fail(403,'Import permission required.');}return asset(path==='/staff/migration'?'/sharing/migration.html':'/sharing/help.html');}
   if(method==='GET'&&path==='/staff/uploads'){if(!await staff())return new Response(null,{status:303,headers:{...headers,Location:'/staff'}});if(env.TOUR_UAC!=='1')fail(404,'Not found.');return asset('/sharing/uploads.html');}
@@ -413,6 +427,10 @@ async function route(request,env,privateStaffOnly,diag=null) {
   }
   if (path.startsWith('/api/staff/')) {
     const account=await requireStaff();
+    if(path==='/api/staff/maintenance'){
+      const result=await maintenanceApi({request,env,db,account,sessionHash:staffTokenHash,body:['POST','DELETE'].includes(method)?await json(request,8192):{}});
+      return output(result.value,result.status);
+    }
     let requestPrincipal=null;
     if(env.TOUR_UAC==='1'){
       if(!passwordAccounts)fail(503,'UAC requires independent staff accounts.');
@@ -425,13 +443,13 @@ async function route(request,env,privateStaffOnly,diag=null) {
     }
     async function requireUploadQueue(apartment){if(!requestPrincipal||!idPattern.test(apartment??''))fail(403,'Authorized queued apartment required.');if(!await one("SELECT 1 FROM uploads_gallery,json_each(apartments) WHERE value=?",apartment))fail(403,'This apartment is no longer accepting uploads.');if(await one("SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)",apartment))fail(403,'Apartment is unavailable.');}
     if(path==='/api/staff/uploads'){if(!requestPrincipal)fail(404,'Not found.');const input=method==='PATCH'?await json(request):{};return output(await uploadsApi({db,principal:requestPrincipal,username:account.username,sessionHash:staffTokenHash,method,input,list:async()=>visibleApartments(requestPrincipal,await uploadInventory()),fail}));}
-    if(env.SCHEMA_REQUIRED&&['POST','PATCH','PUT','DELETE'].includes(method)){let schema;try{schema=await one('SELECT COUNT(*) n FROM app_migrations HAVING COUNT(*)=? AND MAX(version)=? AND MIN(version)=1',Number(env.SCHEMA_REQUIRED),Number(env.SCHEMA_REQUIRED));}catch{}if(!schema){const error=Error('Database upgrade is required before writing.');error.status=503;error.diagnosticCode='SCHEMA_UPGRADE_REQUIRED';throw error;}}
+    if(env.SCHEMA_REQUIRED&&['POST','PATCH','PUT','DELETE'].includes(method)){let schema;try{schema=await one('SELECT COUNT(*) n FROM app_migrations HAVING COUNT(*)=MAX(version) AND MAX(version)>=? AND MAX(version)<=? AND MIN(version)=1',Number(env.SCHEMA_REQUIRED),env.AGENCY_BROWSER_SETUP==='1'?Number(env.SCHEMA_COMPATIBLE_MAX??env.SCHEMA_REQUIRED):Number(env.SCHEMA_REQUIRED));}catch{}if(!schema){const error=Error('Database upgrade is required before writing.');error.status=503;error.diagnosticCode='SCHEMA_UPGRADE_REQUIRED';throw error;}}
     if(path==='/api/staff/version'&&method==='GET')return output({...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',installedSchema:env.SCHEMA_REQUIRED?Number((await one('SELECT MAX(version) n FROM app_migrations'))?.n??0):null});
     if(path==='/api/staff/events'&&method==='POST'){if(env.DIAGNOSTICS_ENABLED!=='1')return output({accepted:false});await throttle('diagnostic-events',account.username);const b=await json(request,8192);let events;try{events=validateClientEvents(b);}catch{fail(400,'Invalid diagnostic milestones.');}if(b.apartment&&!authorize(requestPrincipal,'apartment.view',{id:b.apartment}).allowed)fail(403,'Apartment not authorized.');if(b.apartment&&!idPattern.test(b.apartment))fail(400,'Invalid apartment identifier.');const d=createDiagnostic(request,env);d.actor=account.username;d.apartment=idPattern.test(b.apartment??'')?b.apartment:null;d.category=b.category;d.events=events;d.stage=events.at(-1).stage;const status=events.some(e=>(e.status??200)>=400)?400:200;const result=d.finish(status);result.operation=b.operation;result.span=b.operation;result.code=status===400?'CLIENT_REPORTED_FAILURE':'CLIENT_MILESTONE';result.saved='unknown';result.cause='unknown';result.message='Browser-reported milestone; server outcome is not inferred.';result.suggestion='Review server spans with the same operation ID before retrying.';await storeDiagnostic(db,result,{source:'browser-reported'});return output({accepted:true});}
     if(path==='/api/staff/diagnostics'){if(account.role!=='administrator')fail(403,'Administrator required.');if(env.DIAGNOSTICS_ENABLED!=='1')fail(503,'Diagnostics are not enabled.');if(method==='GET'){try{return output({...await diagnosticQuery(db,url),configuration:{...release,build:env.APP_BUILD??release.version,deployment:env.CF_VERSION_METADATA?.id??'unavailable',passwordMode:passwordAccounts,privateImages:true,logDailyCap:2000}});}catch{fail(400,'Invalid diagnostic filter or unavailable schema.');}}if(method==='PUT'){const b=await json(request,1024);if(!['off','error','normal','detail'].includes(b.level)||!Number.isInteger(b.days)||b.days<1||b.days>30||!Number.isInteger(b.max_rows)||b.max_rows<100||b.max_rows>10000)fail(400,'Invalid diagnostic settings.');await run('UPDATE diagnostic_settings SET level=?,days=?,max_rows=? WHERE id=1',b.level,b.days,b.max_rows);return output({ok:true});}}
     if(path==='/api/staff/me'&&method==='GET'){
       if(!requestPrincipal)return output({role:account.role,permissions:null});
-      return output({username:account.username,role:requestPrincipal.role,permissions:Object.fromEntries(Object.keys(PERMISSIONS).map(a=>[a,effectivePermission(requestPrincipal,a).allowed]))});
+      return output({username:account.username,role:requestPrincipal.role,agencyUpdates:env.AGENCY_BROWSER_SETUP==='1',permissions:Object.fromEntries(Object.keys(PERMISSIONS).map(a=>[a,effectivePermission(requestPrincipal,a).allowed]))});
     }
     if(path==='/api/staff/uac'){
       if(!requestPrincipal||requestPrincipal.role!=='administrator')fail(403,'Administrator UAC required.');

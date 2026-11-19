@@ -16,7 +16,7 @@ const origin='https://synthetic-emulator.workers.dev',ticket=randomBytes(32).toS
 const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'agency',modules:true,scriptPath:fileURLToPath(new URL('worker.js',out)),compatibilityDate:'2026-11-03',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'synthetic-agency'},kvNamespaces:['PHOTOS'],durableObjects:{STAFF_LOGIN:{className:'StaffLogin',useSQLite:true}},serviceBindings:{ASSETS:async()=>new Response('Synthetic assets')},bindings:{INSTALLATION_MODE:'agency',INSTALLATION_ID:'a'.repeat(32),APP_ORIGIN:origin,AGENCY_BROWSER_SETUP:'1',GUEST_CODE_KEY:randomBytes(32).toString('hex'),STAFF_AUTH_MODE:'password',STAFF_ACCOUNTS:'1',TOUR_UAC:'1',TOUR_API_BACKEND:'durable-object',DIAGNOSTICS_ENABLED:'1',SCHEMA_REQUIRED:'4'}}]}));
 try{
  const db=await mf.getD1Database('DB');
- for(const name of ['schema.sql','uac-schema.sql','uploads-schema.sql','diagnostics-schema.sql','agency-setup-schema.sql']){
+ for(const name of ['schema.sql','uac-schema.sql','uploads-schema.sql','diagnostics-schema.sql','agency-setup-schema.sql','maintenance-schema.sql']){
   const sql=(await readFile(new URL('../cloudflare/'+name,import.meta.url),'utf8')).replace(/^\s*--.*$/gm,'').replace(/\r?\n/g,' ');
   await db.exec(sql);
  }

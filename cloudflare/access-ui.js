@@ -3,6 +3,7 @@ let cached;
 export const getAccess=()=>cached??=(async()=>{const r=await fetch('/api/staff/me');if(!r.ok)throw Error('Staff session ended. Sign in again.');return r.json();})();
 export function can(access,key){return access.permissions===null||!!access.permissions[key];}
 export function applyAccess(access){
+ if(access.agencyUpdates&&access.role==='administrator'&&!document.getElementById('software-updates')){const nav=document.querySelector('main>nav');if(nav){const link=document.createElement('a');link.id='software-updates';link.href='/staff/updates';link.textContent='Software updates';nav.append(link);}}
  for(const n of document.querySelectorAll('[data-diagnostics]'))n.hidden=access.role!=='administrator';
  if(!can(access,'backup.import')||!can(access,'apartment.create')||!can(access,'image.upload'))for(const n of document.querySelectorAll('a[href="/staff/migration"]'))n.hidden=true;
  if(access.permissions===null)for(const n of document.querySelectorAll('a[href="/staff/uploads"],#manage-uploads'))n.hidden=true;

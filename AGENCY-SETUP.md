@@ -1,6 +1,6 @@
 # LevelTwo360 agency setup — development preview
 
-Phase 1 is **not release-ready**. The browser workflow is implemented and locally rehearsed. The public OAuth client, hosting approval, verified live Free-plan response, independent Cloudflare acceptance and complete update integration remain open. Do not send a live deployment invitation yet. Phase 2 has not started.
+Phase 1 is **not release-ready**. The browser installer, Administrator approval screen, encrypted infrastructure snapshots, staged signed updates and durable code recovery are implemented and locally rehearsed. Publisher hosting/private OAuth approval, a supported authoritative Free-plan check and independent hosted acceptance remain open. The live OAuth catalog currently omits Billing Read, which the subscription API requires; deployment remains blocked rather than bypassing that check. Do not send a live deployment invitation yet. Phase 2 has not started.
 
 ## For an agency
 
@@ -51,9 +51,15 @@ Cloudflare account-level prerequisites include verified sign-in, permission to c
 
 Installed application/build/schema information is already available in Help/version and authenticated `/api/staff/version`. No automatic or silent update runs. Re-running initial setup is not an upgrade mechanism.
 
-The new [update coordinator](agency/update.mjs) verifies Ed25519-signed release bytes, exact artifact SHA-256, compatible versions and additive schema declarations. It requires a current Administrator approval for the installation, source build and exact manifest, plus fresh Cloudflare authorization. It requires database, actual JPEG and configuration backup evidence with a restore check, rechecks authorization after backup, verifies deployed health, and requests code-only recovery preserving current data and secrets after failure.
+The Administrator **Software updates** page shows the installed and verified compatible version and important changes. Generate/download a private recovery file and store it in your agency’s approved secure storage. Only its public encryption key is sent to LevelTwo360. Approve the exact release; this approval lasts two hours and can be revoked. Then an authorized operator reconnects to Cloudflare on the deployment service and chooses the same account/name and approved request.
 
-This coordinator is a tested **integration component**, not a released updater. The Administrator update screen, durable approval/progress jobs, approved signing-key/release catalog, real backup/export adapters, compare-and-swap deployment adapter and Cloudflare code-recovery adapter are not yet connected. No available compatible release is advertised and no automatic whole-database rollback is offered. These are Phase 1 implementation gates, not owner approvals disguised as completed work.
+The updater pauses editing, including database-level protection against an already-running change. It writes an encrypted installation backup containing D1 business records, staff credentials/roles/permissions, actual JPEG bytes, settings/bindings and a separately sealed guest secret. It restores the saved snapshot in memory to verify integrity before staging the release. Existing accounts, permissions, secrets and apartments are preserved. Only reviewed additive migrations within the retained old code’s declared compatibility range are automatic.
+
+Progress/history is durable and visible. Interrupted jobs inspect the actual deployed version before resuming. Health failures recover the retained code while preserving current data and additive schema. An unrelated external deployment is never force-overwritten. Editing stays paused if recovery cannot be verified; reconnect to the same job with fresh Cloudflare authorization or ask an authorized infrastructure operator for help.
+
+After updating, reconnect to download the encrypted installation backup. Keep it separately from the private recovery file. Copy its verification reference from Administrator history into the approved backup record. This complete infrastructure backup is separate from ordinary encrypted apartment exports. Restoring infrastructure or extracting plaintext requires an authorized technical operator and protected storage; the developer cannot recover a lost private key. Backup/restore limits and exact operator tools are documented in [agency/README.md](agency/README.md).
+
+The workflow is tested locally with real workerd/D1/KV and simulated Cloudflare control-plane responses. It is not approved for hosted/production use yet. The strict Free preflight remains blocked by the documented OAuth permission gap; no public deployment invitation should be sent. Older/manual deployments without recovery protocol 1 require an explicitly approved one-time infrastructure upgrade, and cannot be adopted by retrying setup.
 
 Application-only operational changes continue to use existing Administrator permissions. Changing Worker code, environment, bindings, secrets or D1 schema requires separate Cloudflare infrastructure authorization even when a LevelTwo360 Administrator approved the update. Signing a future release does not grant the publisher authority to deploy it into every agency.
 
@@ -65,5 +71,7 @@ The screenshots use a synthetic agency and localhost infrastructure adapters. Th
 ![Prepared installation preview](docs/agency/02-resources-prepared.png)
 ![Administrator form on a narrow screen](docs/agency/03-administrator-mobile.png)
 ![Successful setup with summary controls](docs/agency/04-ready.png)
+![Verified software update review](docs/agency/05-update-review.png)
+![Recorded update approval](docs/agency/06-update-approved.png)
 
 Publisher deployment and acceptance requirements: [agency/README.md](agency/README.md). Invitation draft: [agency/INVITATION.txt](agency/INVITATION.txt).

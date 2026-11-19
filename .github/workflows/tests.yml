@@ -14,6 +14,7 @@ jobs:
       - run: npm test
       - run: node cloudflare/prepare.mjs
       - run: npm run test:agency:emulator
+      - run: npm run test:agency:update:emulator
   local-browser:
     runs-on: ubuntu-latest
     steps:

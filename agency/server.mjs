@@ -1,14 +1,16 @@
 import {createServer} from 'node:http';
-import {randomBytes,createHash} from 'node:crypto';
+import {randomBytes,createHash,createPublicKey,verify} from 'node:crypto';
 import {readFile,mkdir,rmdir} from 'node:fs/promises';
 import {join,resolve,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {createReadStream} from 'node:fs';
 import {cloudflareApi,provision,wranglerRunner,identifier,installationName,SetupError} from './cloudflare.mjs';
+import {readUpdateRequests,runInstallationUpdate,installationQueries} from './update-service.mjs';
 
 const random=()=>randomBytes(32).toString('base64url');
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"};
-export function createCompanion({origin,clientId,clientSecret,scopes,stateDirectory,build,verifiedFreePlanIds=[],fetcher=fetch,deploy=provision,apiFactory=cloudflareApi,runnerFactory=wranglerRunner,now=Date.now}){
+export function createCompanion({origin,clientId,clientSecret,scopes,stateDirectory,build,verifiedFreePlanIds=[],fetcher=fetch,deploy=provision,apiFactory=cloudflareApi,runnerFactory=wranglerRunner,releaseBundle=null,updater=runInstallationUpdate,now=Date.now}){
  const base=new URL(origin),local=['127.0.0.1','localhost'].includes(base.hostname);
  if((base.protocol!=='https:'&&!local)||base.origin!==origin||!clientId||!clientSecret||!scopes||!build||!stateDirectory)throw Error('Configure the exact HTTPS publisher origin, OAuth client, verified scopes/build and protected state directory.');
  const sessions=new Map(),locks=new Set(),starts=new Map();
@@ -32,6 +34,8 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
    if(url.origin!==origin)return send(res,400,{error:'Invalid website.'});
    const token=req.headers.cookie?.split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);
    const s=token&&sessions.get(digest(token));
+   if(req.method==='GET'&&url.pathname==='/healthz')return send(res,200,{ready:true});
+   if(req.method==='GET'&&url.pathname==='/releases/latest')return releaseBundle?send(res,200,{manifest:releaseBundle.bytes.toString('base64'),signature:releaseBundle.signature.toString('base64')}):send(res,404,{error:'No verified release is configured.'});
    if(req.method==='GET'&&['/','/wizard.js','/wizard.css'].includes(url.pathname)){
     const name=url.pathname==='/'?'index.html':url.pathname.slice(1);
     const content=await readFile(new URL('./'+name,import.meta.url));
@@ -65,10 +69,34 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
     const next=random();sessions.delete(digest(token));sessions.set(digest(next),s);
     return redirect(res,'/',{'Set-Cookie':cookie(next)});
    }
-   if(url.pathname==='/api/state'&&req.method==='GET')return send(res,200,{connected:!!s?.accessToken,accounts:s?.accounts?.map(a=>({id:a.id,name:a.name}))??[],running:!!s?.running,progress:s?.progress??'',error:s?.error??'',result:s?.result??null,freeVerificationAvailable:verifiedFreePlanIds.length>0});
+   if(url.pathname==='/api/state'&&req.method==='GET')return send(res,200,{connected:!!s?.accessToken,accounts:s?.accounts?.map(a=>({id:a.id,name:a.name}))??[],running:!!s?.running,progress:s?.progress??'',error:s?.error??'',result:s?.result??null,updateRequests:s?.updateRequests??[],updatesConfigured:!!releaseBundle,freeVerificationAvailable:verifiedFreePlanIds.length>0});
    if(req.method==='POST'&&url.pathname.startsWith('/api/')){
     if(req.headers.origin!==origin||req.headers['content-type']!=='application/json')return send(res,403,{error:'Use the deployment form on this website.'});
     if(!s||s.deadline<=now())return send(res,401,{error:'Reconnect to Cloudflare to continue. Your installation is preserved.'});
+    if(url.pathname.startsWith('/api/updates/')){
+     if(!s.accessToken)return send(res,401,{error:'Reconnect to Cloudflare to inspect or update your installation.'});
+     const input=await read(req),{account,name,requestId}=input;
+     if(!identifier.test(account)||!s.accounts?.some(a=>a.id===account)||!installationName.test(name))return send(res,403,{error:'Select an authorized account and original installation name.'});
+     const directory=join(stateDirectory,account,name),api=apiFactory(s.accessToken,fetcher);
+     if(url.pathname==='/api/updates/list'){
+      const found=await readUpdateRequests({directory,api});if(found.state.account!==account||found.state.name!==name)return send(res,403,{error:'Installation identity mismatch.'});s.updateRequests=found.requests;return send(res,200,{requests:found.requests});
+     }
+     if(!/^[a-f0-9]{32}$/.test(requestId??''))return send(res,400,{error:'Select an update request.'});
+     if(url.pathname==='/api/updates/backup'){
+      const state=JSON.parse(await readFile(join(directory,'installation.json'),'utf8'));if(state.account!==account||state.name!==name)return send(res,403,{error:'Installation identity mismatch.'});
+      const query=installationQueries(api,state),row=(await query('SELECT backup_digest,backup_file FROM maintenance_requests WHERE id=? AND installation=?',[requestId,state.installation]))[0];
+      if(!row?.backup_digest||!/^snapshot-[a-f0-9]{16}\.lt360backup$/.test(row.backup_file??''))return send(res,404,{error:'A verified encrypted backup is not available.'});
+      const path=join(directory,'updates',requestId,row.backup_file),hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);if(hash.digest('hex')!==row.backup_digest)return send(res,409,{error:'Backup integrity could not be verified. Ask an authorized infrastructure operator to review it.'});
+      res.writeHead(200,{...headers,'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"','X-Backup-SHA256':row.backup_digest});createReadStream(path).on('error',()=>res.destroy()).pipe(res);return;
+     }
+     if(url.pathname==='/api/updates/start'){
+      if(!releaseBundle)return send(res,503,{error:'The publisher has not configured a verified release and trust key.'});
+      const key=account+':'+name;if(s.running||locks.has(key))return send(res,409,{error:'This installation already has a running job.'});locks.add(key);s.running=true;delete s.result;delete s.error;
+      s.job=(async()=>{try{s.result=await updater({account,name,directory,requestId,api,run:runnerFactory({token:s.accessToken,account}),releaseBundle,verifiedFreePlanIds,fetcher,progress:text=>s.progress=text});}catch(e){s.error=e instanceof SetupError?e.message:'The update stopped safely. Inspect its history and reconnect to the same installation to recover.';}finally{s.revoked=await revoke(s);if(s.result)s.result.revoked=s.revoked;s.running=false;locks.delete(key);s.deadline=now()+10*60000;}})();
+      return send(res,202,{started:true});
+     }
+     return send(res,404,{error:'Not found.'});
+    }
     if(url.pathname==='/api/disconnect'){
      if(s.running)return send(res,409,{error:'Wait for the current deployment step to finish.'});
      const revoked=await revoke(s);sessions.delete(digest(token));return send(res,200,{revoked},{'Set-Cookie':cookie('',0)});
@@ -83,7 +111,7 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
      // Start only after returning a bounded response. Polling/refresh shares this
      // job; it does not issue a second deployment. No user values enter a shell.
      s.job=(async()=>{
-      try{s.result=await deploy({account,name,directory:join(stateDirectory,account,name),api:apiFactory(s.accessToken,fetcher),run:runnerFactory({token:s.accessToken,account}),verifiedFreePlanIds,build,progress:value=>s.progress=value});}
+      try{s.result=await deploy({account,name,directory:join(stateDirectory,account,name),api:apiFactory(s.accessToken,fetcher),run:runnerFactory({token:s.accessToken,account}),verifiedFreePlanIds,build,companionOrigin:origin,updatePublicKey:releaseBundle?.publicKey,progress:value=>s.progress=value});}
       catch(e){s.error=e instanceof SetupError?e.message:'Setup stopped safely. Reconnect and retry the same installation. Existing resources and accounts are preserved.';}
       finally{s.revoked=await revoke(s);if(s.result)s.result.revoked=s.revoked;locks.delete(key);s.running=false;s.deadline=now()+10*60000;}
      })();
@@ -100,6 +128,7 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const env=process.env;
+ if(env.AGENCY_OAUTH_CLIENT_SECRET_FILE)env.AGENCY_OAUTH_CLIENT_SECRET=(await readFile(env.AGENCY_OAUTH_CLIENT_SECRET_FILE,'utf8')).trim();
  if(!isAbsolute(env.AGENCY_STATE_DIRECTORY??'')||!/^[a-f0-9]{40}$/.test(env.AGENCY_VERIFIED_BUILD??''))throw Error('Use an absolute protected state directory outside the source checkout and the full tested commit hash.');
  const root=fileURLToPath(new URL('../',import.meta.url));
  const state=resolve(env.AGENCY_STATE_DIRECTORY);
@@ -107,8 +136,12 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  await mkdir(state,{recursive:true,mode:0o700});
  const lease=join(state,'companion-service.lock');
  try{await mkdir(lease,{mode:0o700});}catch{throw Error('Another companion instance may own this state directory. After a crash, an operator must verify no instance is running before removing the empty companion-service.lock directory.');}
- const server=createCompanion({origin:env.AGENCY_ORIGIN,clientId:env.AGENCY_OAUTH_CLIENT_ID,clientSecret:env.AGENCY_OAUTH_CLIENT_SECRET,scopes:env.AGENCY_OAUTH_SCOPES,stateDirectory:env.AGENCY_STATE_DIRECTORY,build:env.AGENCY_VERIFIED_BUILD,verifiedFreePlanIds:(env.AGENCY_VERIFIED_FREE_PLAN_IDS??'').split(',').filter(Boolean)});
+ let releaseBundle=null;
+ if(env.AGENCY_RELEASE_DIRECTORY&&env.AGENCY_UPDATE_PUBLIC_KEY_FILE)releaseBundle={bytes:await readFile(join(env.AGENCY_RELEASE_DIRECTORY,'manifest.json')),signature:Buffer.from((await readFile(join(env.AGENCY_RELEASE_DIRECTORY,'release.sig'),'utf8')).trim(),'base64'),artifact:await readFile(join(env.AGENCY_RELEASE_DIRECTORY,'artifact.lt360release')),publicKey:await readFile(env.AGENCY_UPDATE_PUBLIC_KEY_FILE,'utf8')};
+ if(releaseBundle){const key=createPublicKey(releaseBundle.publicKey);if(key.asymmetricKeyType!=='ed25519'||!verify(null,releaseBundle.bytes,key,releaseBundle.signature)||createHash('sha256').update(releaseBundle.artifact).digest('hex')!==JSON.parse(releaseBundle.bytes).artifactSha256)throw Error('Configured release verification failed. The companion will not serve this catalog or accept update jobs.');}
+ const server=createCompanion({origin:env.AGENCY_ORIGIN,clientId:env.AGENCY_OAUTH_CLIENT_ID,clientSecret:env.AGENCY_OAUTH_CLIENT_SECRET,scopes:env.AGENCY_OAUTH_SCOPES,stateDirectory:env.AGENCY_STATE_DIRECTORY,build:env.AGENCY_VERIFIED_BUILD,verifiedFreePlanIds:(env.AGENCY_VERIFIED_FREE_PLAN_IDS??'').split(',').filter(Boolean),releaseBundle});
  server.on('close',()=>void server.whenIdle().then(()=>rmdir(lease)));
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>{server.close();});
- server.listen(Number(env.PORT??4198),'127.0.0.1',()=>console.log('LevelTwo360 agency companion is listening behind its configured HTTPS proxy.'));
+ const host=env.AGENCY_BIND_HOST??'127.0.0.1';if(host!=='127.0.0.1'&&!(host==='0.0.0.0'&&env.AGENCY_CONTAINER_PROXY==='1'))throw Error('Public plaintext listening is disabled. Container mode requires an approved HTTPS proxy and loopback-only host port mapping.');
+ server.listen(Number(env.PORT??4198),host,()=>console.log('LevelTwo360 agency companion is listening behind its configured HTTPS proxy.'));
 }

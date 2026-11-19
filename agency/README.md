@@ -1,92 +1,104 @@
-# Agency companion — Phase 1 development preview
+# LevelTwo360 agency distribution — publisher operations
 
-This service hosts the browser deployment wizard. The agency runs no terminal or GitHub workflow. Its short-lived Cloudflare OAuth authorization is used by the companion to run the existing pinned Wrangler infrastructure tooling. Administrator passwords are entered later, directly on the agency Worker. No existing installation was deployed or modified while developing this branch.
+The Phase 1 browser installer and safe-update workflow are implemented on PR #51. Local tests exercise the real application in workerd with D1/KV/SQLite Durable Objects; Cloudflare control-plane writes are simulated. No hosted acceptance, OAuth registration, DNS change, billing change or production deployment has been performed.
 
-## Deployment mechanism decision
+**Release remains blocked:** the live self-managed OAuth scope catalog checked on 19 November 2026 does not expose Billing Read. Cloudflare documents Billing Read or Billing Write for the subscriptions endpoint used by the strict Workers Free preflight. The service refuses provisioning and upgrades without positive Free evidence. Account Settings Read, `default_usage_model=standard`, an empty subscription response, and a Free website/zone are not substitutes. No unsupported scope or paid/billing-write permission is requested. A private registration alone cannot resolve this platform limitation.
 
-Cloudflare’s official [Deploy to Cloudflare button](https://developers.cloudflare.com/workers/platform/deploy-buttons/) supports a link of this form:
+## Implemented agency workflow
 
-`https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fkhisanthax%2FSupported-Housing-Virtual-Tours`
+1. The agency opens the approved companion URL, authorizes Cloudflare directly, selects its own account/name and confirms Workers Free. No agency GitHub account, API-key copying, software installation or terminal is required.
+2. The companion verifies Free evidence, creates/resumes independent resources and applies the idempotent schemas. Its journal, resource identity checks and create intents prevent blind replacement. An initialized installation is never upgraded by retrying setup.
+3. The agency chooses its Administrator password directly on its Worker using an installation-bound, expiring 256-bit setup ticket. D1 stores only its digest; atomic insertion/closure prevents concurrent initial Administrators. Pending installs refuse ordinary application access. Health checks include the recovery tables and database write barrier.
+4. The Administrator uses **Software updates** to view installed/compatible versions and verified release notes. A private recovery key is generated/downloaded in the browser; only its public RSA key leaves the device. Approval is durable, limited to two hours, and bound to installation, account revision, installed build and signed manifest. Approval can be revoked.
+5. An authorized agency operator reconnects to Cloudflare on the companion, selects the same installation and checks existing updates. Infrastructure authorization is separate from application Administrator approval. There is no permanent publisher access or background automatic updater.
+6. The update acquires a D1 maintenance lock. Database triggers prevent already-running business writes from committing after that lock; sign-in, status and approval revocation remain available. A complete encrypted snapshot is written and restored in memory to verify database integrity and actual JPEG hashes before activation.
+7. The signed compiled Worker/assets are staged without activation. Only strict additive CREATE TABLE/INDEX migrations are automatic, with conflict detection and contiguous ledger entries. Current secrets, variables, bindings and compatibility settings are preserved; changed or unsupported resources require review. The retained old code must declare compatibility with the new schema.
+8. The expected previous version is checked before activation. The new version is checked for exact version/build/schema health. Failures recover only the retained code version and preserve current data, secrets and additive schema. A crashed job observes its actual deployed version before acting. An unrelated external deployment or failed recovery leaves writes paused for operator review; it is never force-overwritten.
+9. After completion/recovery the agency reconnects and downloads its encrypted installation backup. Store it separately from the private recovery file and trusted verification reference shown in Administrator history.
 
-That documented mechanism clones a repository into the agency’s GitHub/GitLab account and builds it. It can provision D1, KV and Durable Objects, but does not by itself prove which person should become this application’s first Administrator. **The link above is reference syntax, not an enabled LevelTwo360 deployment button**: the current root repository has no browser deployment configuration for it. Do not send it as a working installation link.
+## Exact verified OAuth permissions
 
-The companion implements the no-agency-GitHub alternative using official [self-managed OAuth clients](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/) and [OAuth endpoints](https://developers.cloudflare.com/fundamentals/oauth/integrate-with-cloudflare/). The eventual agency link is simply the approved HTTPS companion origin, with no credential or installation ticket in the email URL. The origin is not yet provisioned or approved.
+The checked global catalog subset is [oauth-scopes.verified.json](oauth-scopes.verified.json). Discovery was read-only, used an existing authorized local publisher session without printing/copying its token, and did not inspect apartment/staff content.
 
-[Temporary claim deployments](https://developers.cloudflare.com/workers/platform/claim-deployments/) were researched but not used: the mission requires the agency to create/control its account before authorizing resource deployment, forbids creating new external accounts here, and requires durable ownership and resource validation. No temporary Cloudflare account was created.
+| Permission | Exact live scope ID | Purpose / consequence |
+| --- | --- | --- |
+| Account Settings Read | `account-settings.read` | Account selection and prerequisites; no account-setting writes |
+| Workers Scripts Write | `workers-scripts.write` | Worker code/assets, secret metadata/writes, versions/deployments and SQLite DO bindings |
+| D1 Write | `d1.write` | Dedicated database creation, queries, additive schema and encrypted backup collection |
+| Workers KV Storage Write | `workers-kv-storage.write` | Dedicated namespace creation, inventory and actual image backup |
+| Billing Read | **Absent from the checked catalog** | Documented prerequisite of GET `/accounts/{account_id}/subscriptions`; this blocks the current strict Free detector |
 
-## Owner actions required before external use
+These resource scopes can grant broad access within the account selected on Cloudflare's consent screen; a future resource cannot be selected before it exists. Use the dedicated agency account and review Cloudflare's actual consent boundaries. The implementation addresses only journaled installation resources. No Billing Write, payment, DNS, account-membership, R2, analytics, refresh/offline-access, OAuth-client administration or zone route scope is requested by agency setup.
 
-1. Approve an existing isolated Cloudflare test account/environment for live tests. No account has been chosen by this implementation. Do not supply credentials in chat.
-2. Choose and authorize a publisher HTTPS origin and hosting environment for this Node.js 24 companion. Workers Free remains the agency target; the Node companion itself needs a separate approved host. This branch does not claim that hosting service is already free, configured or deployed.
-3. Register the publisher’s Cloudflare OAuth client with exact redirect URI `https://APPROVED-PUBLISHER-ORIGIN/oauth/callback`, Authorization Code, `client_secret_basic`, and PKCE S256. Configure no continuing refresh grant or offline access. Select scope IDs from Cloudflare’s live `/oauth/scopes` catalog rather than guessing names or borrowing Wrangler’s client ID. Required operations are listed below. Keep the client secret in the host secret manager.
-4. Initially test with a private client in the approved test account. Cross-account agency distribution needs a public client: logo, client URL, required scope configuration, DNS domain verification and a visibility promotion. Cloudflare documents that public promotion is **permanent** and the verified client domain cannot be changed. These DNS/client/access-permission changes require explicit owner authorization. None was made.
-5. Verify the actual read-only Workers Free response with the selected OAuth scopes. The generic subscription API does not document a stable Workers Free identifier. The adapter currently requires exactly one active `rate_plan.scope === 'workers'`, `state === 'Provisioned'`, zero-price record with an explicitly verified allowlisted plan ID. Its field mapping may need adjustment after observing an authorized response. Defaults intentionally block provisioning. An empty response, forbidden read, zero-price trial, or zone Free subscription must never be treated as Free. If the API cannot provide authoritative evidence, implement a supported alternative and record its limits; do not silently remove this gate.
-6. Complete the update integrations and independent acceptance matrix below. Decide redistribution/licensing and release policy before public invitations, consistent with DISTRIBUTION.md.
+Creating the publisher client is a separate owner operation requiring Cloudflare Administrator/Super Administrator or OAuth Clients Write. It is not a permission granted to agencies' runtime deployments. Official references: [client registration and scope discovery](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/), [subscription API accepted permissions](https://developers.cloudflare.com/api/resources/accounts/subresources/subscriptions/methods/get/), [deployment API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/methods/create/), [rollback restrictions](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/).
 
-## Host configuration
+## Prepared configuration and operator tools
 
-Run `npm ci`, `npm test`, `npm run test:agency:browser`, `npm run test:agency:emulator`, and `node cloudflare/prepare.mjs` on a clean, reviewed checkout. Verify the source commit and artifact in CI before hosting. Set the following through the host’s protected configuration; no automatic `.env` loader or credentials file is included:
+These commands prepare local files; they never register, publish or deploy a client:
 
-| Variable | Purpose |
+```text
+node agency/catalog-cli.mjs --from-wrangler --output PROTECTED_CATALOG_JSON
+node agency/prepare-operations.mjs --origin https://APPROVED_STAGING_HOST --build TESTED_FULL_GIT_SHA --catalog PROTECTED_CATALOG_JSON --output NEW_PROTECTED_DIRECTORY
+```
+
+Catalog discovery can alternatively use a protected `AGENCY_CATALOG_BEARER_FILE` supplied by the publisher's secret manager. Never paste a bearer token into chat or a command argument. The generated `private-oauth-registration.json` uses Authorization Code, client_secret_basic, exact callback `/oauth/callback`, the four confirmed scopes, and no public visibility or refresh grant. `deployment-preflight.json` records unresolved Free verification and explicitly disallows public promotion, billing and production changes. The environment example contains file paths/placeholders, never a secret value. Missing/guessed scopes, non-HTTPS origins and malformed builds are rejected.
+
+Host the Node.js 24 service behind the approved HTTPS reverse proxy. The default listener is loopback port 4198. [Dockerfile](Dockerfile) requires an owner-reviewed official Node 24 image pinned by digest; no base image is silently selected. Container mode listens internally on port 4198: expose it only with a loopback host mapping such as `127.0.0.1:4198:4198`, behind the approved TLS proxy. [Caddyfile.example](Caddyfile.example) is prepared only; starting it would publish a host and request certificates and is not authorized by this PR. No container or proxy has been deployed. Production asset preparation excludes development secrets.
+
+| Host variable | Value / policy |
 | --- | --- |
-| `AGENCY_ORIGIN` | Exact HTTPS public origin, without trailing slash; loopback HTTP is accepted only for local tests |
-| `AGENCY_OAUTH_CLIENT_ID` | Publisher’s registered client ID |
-| `AGENCY_OAUTH_CLIENT_SECRET` | Host secret-manager value; never a repository or agency-entered value |
-| `AGENCY_OAUTH_SCOPES` | Space-separated scope IDs verified against the live catalog and registered client |
-| `AGENCY_STATE_DIRECTORY` | Absolute protected directory outside the checkout; agency resource journals/configuration only |
-| `AGENCY_VERIFIED_BUILD` | Full 40-character SHA of the tested checkout; operator must establish byte parity |
-| `AGENCY_VERIFIED_FREE_PLAN_IDS` | Comma-separated exact Workers Free plan IDs confirmed by authorized live testing; empty disables provisioning |
-| `PORT` | Loopback listener, default 4198 |
+| `AGENCY_ORIGIN` | Exact approved HTTPS origin, no trailing slash |
+| `AGENCY_OAUTH_CLIENT_ID` | Set after approved private registration |
+| `AGENCY_OAUTH_CLIENT_SECRET_FILE` | Protected host secret-store file, preferred; never in Git |
+| `AGENCY_OAUTH_SCOPES` | Space-separated verified scope IDs above |
+| `AGENCY_STATE_DIRECTORY` | Absolute protected persistent directory outside checkout |
+| `AGENCY_VERIFIED_BUILD` | Tested full source SHA; establish byte parity in release acceptance |
+| `AGENCY_VERIFIED_FREE_PLAN_IDS` | Empty until authoritative plan evidence is supported and validated |
+| `AGENCY_RELEASE_DIRECTORY` | Read-only signed `manifest.json`, `release.sig`, `artifact.lt360release` |
+| `AGENCY_UPDATE_PUBLIC_KEY_FILE` | Separately approved pinned Ed25519 public key; never supplied by a candidate manifest |
 
-Start `npm run start:agency` behind the approved HTTPS reverse proxy. It binds loopback, not a public unencrypted interface. Use one process/one protected journal volume; do not load-balance this prototype. The executable creates an exclusive `companion-service.lock` directory. After a crash, an operator must verify no process/job owns the volume before removing that empty lock directory. Never remove installation journals as a retry shortcut. After a restart, browsers must reconnect to Cloudflare; their installation resumes from its journal.
+The startup loader verifies the configured signature/artifact before serving the catalog. New installations pin that public key and exact HTTPS catalog origin; only the Administrator update page requests public release metadata. It sends no apartments, staff cookies or installation identifiers to that catalog. A signed release still cannot install without application approval and fresh infrastructure consent.
 
-Enforce Windows NTFS ACLs or equivalent host access controls on the state directory; POSIX mode 0600/0700 alone does not enforce Windows policy. Exclude credentials, callback query strings, cookies, request bodies, setup fragments and result payloads from reverse-proxy/APM/access logs. This server emits no per-request logs, CLI error output or analytics. Configure bounded proxy body sizes, timeouts and network-level abuse protection. The prototype uses process-local authorization-start rate limits (eight/minute/source; 1,000-session cap), a single active deployment per account/name, and bounded provisioning commands. Do not deploy multiple instances without transactional jobs/locks.
+Use one companion process and protected journal volume. An exclusive service lock prevents multiple executables from sharing it. After a crash, verify no process/job owns the volume before removing the empty service-lock directory; never remove installation journals to retry. The D1 lock serializes update jobs across hosts; the process/journal lock also serializes provisioning. Cloudflare's deployment API does not provide a documented atomic compare-and-swap against an external operator's dashboard action: application jobs are serialized and expected-version checked, but operators must avoid parallel infrastructure changes during the acceptance/update window. Unknown external versions stop recovery rather than being overwritten.
 
-The pinned Wrangler runner explicitly sets `WRANGLER_WRITE_LOGS=false` and `WRANGLER_LOG_SANITIZE=true`, suppresses debug output, removes inherited structured-output destinations and legacy developer fallback credentials, pins the official API destination and passes only the agency's current token/account as Cloudflare authentication. This is tested independently of host environment defaults. Proxy/APM configuration remains a separate host responsibility.
+Enforce real NTFS ACLs or host-equivalent controls; POSIX mode bits alone do not enforce Windows isolation. Disable proxy/APM/body/query/cookie logging. OAuth access tokens are memory-only, no refresh token is used, and revocation is attempted on finish/failure/disconnect/expiry. Reconnection uses fresh authorization. Wrangler disk/debug outputs and metrics are disabled, sanitization is forced, alternate API endpoints/legacy credentials/output files are removed, and publisher `AGENCY_*` secrets are not passed to Wrangler. No support token, staff password or application session is substituted for Cloudflare credentials.
 
-### Required read/write operations
+## Signed release preparation
 
-The consent should cover account selection/read, read-only authoritative Workers plan evidence, workers.dev subdomain read, Worker scripts/settings read/write, private D1 database create/read/query, private KV namespace create/read, Worker secret create/list, SQLite Durable Object class/binding deployment, and asset upload. Obtain exact permission-to-scope mappings from the live catalog and API documentation during isolated acceptance. No billing/subscription writes, payment method, R2, DNS edits, zone-wide administration or public OAuth-client management is performed by agency setup. Publisher DNS/client registration is a separate owner operation.
+After source/test approval, an authorized release operator can prepare, without publishing:
 
-### Authorization lifecycle
+```text
+node agency/release-cli.mjs --build TESTED_FULL_GIT_SHA --from SUPPORTED_SOURCE_VERSIONS --from-schemas SUPPORTED_SOURCE_SCHEMAS --private-key-file PROTECTED_ED25519_FILE --notes-file REVIEWED_NOTES_FILE --output NEW_PROTECTED_RELEASE_DIRECTORY
+```
 
-OAuth state and S256 verifier are bound to a random HttpOnly cookie, with callback state consumption and cookie rotation. A completed callback retains only the access token in process memory for at most ten minutes of idle session use; provider expiration can be earlier. No refresh token is retained, used or persisted. Reconnect starts a new consent flow. On completion, failure, disconnect or expiry, revocation is attempted and the local token is discarded. If revocation cannot be confirmed, the UI tells the agency to revoke the application in Cloudflare. A running job completes its bounded steps before graceful shutdown releases its journal lease. The companion is a trusted deployment service during this explicit authorization; this is not a claim that an OAuth publisher cannot misuse an active grant.
+The tool requires a clean matching checkout, compiles with pinned Wrangler, packages actual asset bytes/hashes, signs the exact manifest bytes and writes no deployment configuration into the artifact. Optional `--migrations-file` accepts the restricted additive format. Trust-key creation/custody and promotion of a real release are owner decisions, not an automatically generated publisher identity. Synthetic 0.2.1/schema-5 fixtures are tests, not published releases. Existing manual/older installations without recovery protocol 1 need a one-time explicitly authorized infrastructure upgrade; the companion refuses to treat initial setup retry as that upgrade.
 
-The setup ticket is a separate random 256-bit bearer credential, valid for ten minutes, bound to the installation identity. Only SHA-256 is persisted in the agency D1 table. The ticket is returned only to the authorized browser in a no-store response and sent to `/setup` as a fragment, then removed before application requests. It is never in an email link, query parameter or HTTP access log. It is held only in browser/server process memory, never localStorage. Refreshing the Administrator form requires reconnecting; refreshing the companion can recover the pending result until session expiry. A reconnect rotates only an unconsumed ticket. Public APIs cannot issue tickets or initialize a database.
+## Backup custody and disaster recovery
 
-`agency_setup_close` clears the digest and sets completion in the same D1 transaction that inserts any first staff account. Account insertion rechecks empty accounts, installation, exact digest, expiry and unconsumed state in one statement. A failed hash does not consume the ticket. Concurrent insertions cannot both create initial Administrators. Bootstrap requests bypass diagnostic/activity body inspection. The new route is disabled unless `AGENCY_BROWSER_SETUP=1` and `INSTALLATION_MODE=agency`. Existing manual Cloud deployments and Local Only do not enable it.
+Snapshots contain logical D1 business records, staff verifiers/roles/scopes/audit history, all KV bytes, bindings/configuration and a separately agency-key-sealed guest secret. Active session/rate-limit data, pending update authority and bounded diagnostic event rows are deliberately excluded; diagnostic settings are retained. A restoration requires fresh sign-in. Normal code recovery does not restore any database and does not clear live sessions or change accounts.
 
-Pending installs serve only setup assets and a minimal health response; ordinary staff and guest routes fail closed. An existing Worker must have the saved installation binding before it can be reused. An initialized installation is not redeployed; unhealthy existing installations with an Administrator stop for operator review before schema changes. Resource create intent is journaled before API calls to recover a lost response without issuing blind duplicate creates. Existing secrets and Administrators are preserved. There is no delete/reset API.
+Snapshots use fresh AES-256-GCM keys/record nonces, wrapped to the agency's RSA-OAEP-SHA256 public key. No plaintext backup is written to companion disk. Verification restores the saved ciphertext into an in-memory SQLite database and checks integrity, foreign keys and JPEG hashes. Keyset pagination avoids quadratic OFFSET scans against D1 Free. Pilot bounds: 64 MiB serialized business rows, 4 MiB/image, 64 MiB release package, 1 GiB encrypted snapshot. Larger installations stop safely for operator-assisted backup. Quota/disk/network failures do not authorize a partial backup or upgrade.
 
-## Verified evidence and open gates
+The private recovery file is a sensitive credential. Keep it in agency-approved secure storage, separately from ciphertext. Copy the trusted backup SHA-256 reference from signed-in update history and retain it separately: recipient encryption alone does not prove who created an arbitrary replacement file. The authenticated companion verifies that reference before downloading ciphertext. Offline verification/extraction also requires the trusted reference:
 
-Run `npm test` for Node/SQLite/real Worker route regressions. Run `npm run test:agency:browser` for Chromium with simulated OAuth/infrastructure and the actual Worker/bootstrap handlers behind a local transport adapter. The browser harness blocks non-fixture network traffic; it does not authenticate a real Cloudflare user. An early redirect-mocking attempt reached Cloudflare's authorization error page; the fixture was corrected to intercept the local authorization start and block all non-fixture destinations. No account creation, consent, deployment or credential exchange occurred there.
+```text
+node agency/verify-backup.mjs ENCRYPTED_BACKUP PRIVATE_RECOVERY_FILE TRUSTED_SHA256
+node agency/recover-backup.mjs ENCRYPTED_BACKUP PRIVATE_RECOVERY_FILE TRUSTED_SHA256 NEW_PROTECTED_RECOVERY_DIRECTORY
+```
 
-| Phase 1 acceptance item | Current evidence |
-| --- | --- |
-| 1. Independent new Cloudflare installation | Journal/provisioning adapter tests and isolated config tests; live account acceptance pending |
-| 2. First Administrator | Real Worker/D1-adapter concurrent insertion, password sign-in, browser form, strong-password/origin/expiry failures |
-| 3–4. Staff creation and restrictions | Existing full real Worker/SQLite regressions pass; new hosted agency acceptance pending |
-| 5–7. Apartments, private JPEGs, publication/guests | Existing regression suite passes; no new remote test performed |
-| 8. Encrypted backups/restoration | Existing cryptographic/Local Only/Worker regression suite passes; new hosted installation restore pending |
-| 9–11. Init, interruption and duplicate prevention | Lost-create-response retry, atomic journals, explicit Free preflight, duplicate-job and bootstrap race tests; real Cloudflare failure rehearsal pending |
-| 12–13. Agency isolation and independent secrets | Separate resource-config tests, installation-bound bootstrap denials, random IDs/guest secrets; cross-account remote rehearsal pending |
-| 14. Free without billing | Current official limits researched; fail-closed preflight tests. Actual OAuth plan evidence and live Free install unverified |
-| 15. Update and recovery | Signed-release, exact approval/artifact, dual authorization, backup gates, revocation-during-backup, health failure and code recovery coordinator tests; UI, durable jobs and actual infrastructure adapters still incomplete |
+Extraction writes a new SQLite database, exact image bytes/index and a PRIVATE configuration/secrets file outside the checkout. It never uploads, overwrites an existing directory or modifies production. Plaintext extraction is for an authorized agency infrastructure operator and requires protected local storage. Restoring into Cloudflare or changing production bindings remains a separate owner-approved operation. A lost private key cannot be recovered by the developer.
 
-The browser probe also verifies no Administrator password reaches the companion, ticket-fragment removal, narrow layout, setup summary download without credentials, bootstrap closure and sign-in handoff. Screenshots are synthetic and checked visually. No physical-device acceptance is claimed. CI includes the browser probe but remote CI status must be recorded separately from local results.
+## Owner actions still required
 
-`npm run test:agency:emulator` additionally bundles the real Worker with Wrangler and executes it in the pinned Miniflare/workerd runtime with ephemeral D1, KV and SQLite Durable Objects. It passed concurrent first-Administrator closure, native scrypt through the private password object, Administrator and Staff sign-in, Staff denial of account management, apartment creation, private JPEG upload/retrieval with exact byte equality, encrypted package restoration, and prepared/ready health checks. No external Cloudflare account, remote deployment, billing state or public Free CPU behavior is established by this local-runtime test. The existing Local Only browser acceptance also passed offline restart/editing/backup and zero-external-request gates after these changes.
+| Exact action | Why / consequences | Current status |
+| --- | --- | --- |
+| Select an existing isolated Workers Free account and permit two uniquely named synthetic test installations | Enables actual resource/quota/auth acceptance; consumes that account's free allowances; no real agency content or existing deployment changes | Not authorized/selected |
+| Approve an existing HTTPS staging origin/host and private OAuth client registration using the prepared payload | Creates a private publisher application and protected client secret; initially only members of its parent account can consent; no public promotion or billing writes | Not executed |
+| Obtain Cloudflare confirmation of a supported self-managed OAuth permission/endpoint for authoritative Workers Free evidence | Billing Read is absent from the current catalog; approvals alone do not fix it. Do not request invented scope IDs, Billing Write, copied agency API keys or permanent developer access | Platform blocker |
+| Approve a release signing identity/public-key pin and private backup/journal custody on the chosen host | Establishes which reviewed release artifacts agencies may approve; private signing key stays outside the runtime/repository | No real identity created |
+| Later, separately approve publisher domain verification and permanent public OAuth visibility | Required for cross-account distribution. Cloudflare documents that public promotion is irreversible and the verified client domain cannot be changed | Explicitly not authorized/executed |
+| Approve hosted acceptance, then actual agency production rollout separately | Local emulator success is not proof of hosted Free CPU, real consent behavior or deployment propagation | Pending |
 
-## Update integration still required
+Suggested Cloudflare support question (not sent): “Which supported self-managed OAuth scope authorizes GET /accounts/{account_id}/subscriptions, or which documented read-only endpoint authoritatively distinguishes Workers Free from Paid? The current /oauth/scopes catalog exposes the four resource scopes listed above but no Billing Read. We must not enable billing or ask agencies to copy API keys.”
 
-`update.mjs` has no live deployment entry point. Its callbacks are explicit trusted host interfaces; test doubles are not backup, authorization, deployment or rollback proof. Before enabling it:
-
-- Add an authenticated Administrator update page showing installed/available compatible versions, verified release notes, exact approval and readable progress/history. Store approval/revocation durably with account revision, manifest/build/install binding and expiration.
-- Approve a publisher signing key and immutable release channel. Never accept a trust key delivered by the candidate manifest. Verify artifact bytes and source/CI provenance before deployment; synthetic `0.2.1` in tests is not a published release.
-- Implement and rehearse complete D1, actual KV JPEG and agency-controlled secret/configuration backups in agency-approved storage. A KV list or a confirmation checkbox is not backup evidence. Do not put verifiers/backups in public journals or ordinary support reports.
-- Wire fresh agency Cloudflare OAuth authorization and revalidation of the live approving Administrator. Build changes and permission/approval revocation during backup must stop deployment.
-- Use durable jobs and deployment compare-and-swap against the approved installed build. Do not allow concurrent updates or treat initial setup retries as updates. Record crash-recovery checkpoints.
-- Implement additive migration and code-only rollback adapters preserving D1/KV, secrets, accounts, scopes and class bindings. Verify health, original synthetic record/byte preservation and recovery on an approved isolated environment. Never roll an old database over newer edits as a code rollback shortcut.
-
-Phase 2 remains deferred until all Phase 1 gates close. This branch creates no temporary support account, support token system, remote Local Only capability or developer backdoor.
+Follow [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md). Phase 1 cannot be declared complete until the plan-verification path and approved hosted acceptance close. Phase 2 is therefore still deferred; this branch creates no temporary support account or support access/backdoor, and Local Only remains device-local.

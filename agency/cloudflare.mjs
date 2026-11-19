@@ -22,20 +22,25 @@ export function freePlan(subscriptions,verifiedFreePlanIds){
 }
 
 export function cloudflareApi(token,fetcher=fetch){
- return async(path,{method='GET',body}={})=>{
+ const request=async(path,{method='GET',body}={})=>{
   const r=await fetcher('https://api.cloudflare.com/client/v4'+path,{method,redirect:'error',signal:AbortSignal.timeout(30000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
   // Raw Cloudflare errors may contain operational identifiers. Never log or
   // return them to the browser, and never retry a mutation blindly.
   if(r.status===401||r.status===403)throw new SetupError('Cloudflare authorization is missing or has expired. Reconnect, select the same installation, and retry.');
   const data=await r.json();
   if(!r.ok||!data.success)throw new SetupError('Cloudflare could not complete this step. Check permissions, free allowances and resource availability, then retry the same installation.');
-  return data.result;
+  return data;
  };
+ const api=async(...args)=>(await request(...args)).result;
+ api.page=request;
+ api.binary=async path=>{const r=await fetcher('https://api.cloudflare.com/client/v4'+path,{headers:{Authorization:'Bearer '+token},redirect:'error',signal:AbortSignal.timeout(30000)});if(!r.ok)throw new SetupError('An image could not be backed up with this authorization.');return r.arrayBuffer();};
+ return api;
 }
 
 export function provisioningEnvironment({token,account},base=process.env){
  const env={...base,CLOUDFLARE_API_TOKEN:token,CLOUDFLARE_ACCOUNT_ID:account,CLOUDFLARE_API_BASE_URL:'https://api.cloudflare.com/client/v4',WRANGLER_SEND_METRICS:'false',WRANGLER_WRITE_LOGS:'false',WRANGLER_LOG_SANITIZE:'true',WRANGLER_LOG:'error',CI:'true'};
  for(const key of ['CLOUDFLARE_API_KEY','CLOUDFLARE_EMAIL','CF_API_KEY','CF_EMAIL','CF_API_TOKEN','CF_API_BASE_URL','WRANGLER_OUTPUT_FILE_PATH','WRANGLER_OUTPUT_FILE_DIRECTORY'])delete env[key];
+ for(const key of Object.keys(env))if(key.startsWith('AGENCY_'))delete env[key];
  return env;
 }
 
@@ -59,7 +64,7 @@ export async function saveJournal(path,value){
 
 // The companion serializes jobs by account/installation. It is intentionally a
 // single-process service until a distributed, transactional job store is added.
-export async function provision({account,name,directory,api,run,verifiedFreePlanIds,progress=()=>{},build,fetcher=fetch}){
+export async function provision({account,name,directory,api,run,verifiedFreePlanIds,progress=()=>{},build,fetcher=fetch,companionOrigin,updatePublicKey}){
  if(!identifier.test(account)||!installationName.test(name)||!build)throw new SetupError('Select a valid account, installation name and verified build.');
  progress('Checking your Workers Free plan');
  if(!freePlan(await api(`/accounts/${account}/subscriptions`),verifiedFreePlanIds))throw new SetupError('Workers Free could not be verified for this account. Nothing has been provisioned. Check the Workers plan in Cloudflare; a Free website plan is different. No upgrade or payment method will be requested.');
@@ -101,9 +106,11 @@ export async function provision({account,name,directory,api,run,verifiedFreePlan
  }
  const config=installationConfig({...state,name:state.resourceName,origin,build});
  config.vars.AGENCY_BROWSER_SETUP='1';
+ config.vars.SCHEMA_COMPATIBLE_MAX=String(release.schema+1);
+ if(companionOrigin&&updatePublicKey){const origin=new URL(companionOrigin);if(origin.protocol!=='https:')throw new SetupError('An HTTPS update service is required.');Object.assign(config.vars,{AGENCY_COMPANION_ORIGIN:origin.origin,UPDATE_CATALOG_URL:origin.origin+'/releases/latest',UPDATE_PUBLIC_KEY:updatePublicKey});}
  const configPath=join(directory,'wrangler.json');await saveJournal(configPath,config);
  progress('Initializing the database safely');
- for(const schema of [...schemaFiles,'agency-setup-schema.sql'])await run(['d1','execute','DB','--remote','--config',configPath,'--file',join(root,'cloudflare',schema),'--yes']);
+ for(const schema of [...schemaFiles,'agency-setup-schema.sql','maintenance-schema.sql'])await run(['d1','execute','DB','--remote','--config',configPath,'--file',join(root,'cloudflare',schema),'--yes']);
  const query=async sql=>{
   const results=await api(`/accounts/${account}/d1/database/${state.database}/query`,{method:'POST',body:{sql}});
   if(!results.every(r=>r.success!==false))throw new SetupError('Database initialization failed. Retry this installation.');

@@ -2,7 +2,7 @@ import { appendUploadViewpoints } from '../dist/uploads-data.js';
 import { validatePolicy } from '../cloudflare/policy-store.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash,generateKeyPairSync,sign } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import worker, { StaffLogin } from '../cloudflare/worker.mjs';
@@ -16,6 +16,7 @@ import {setupDigest} from '../cloudflare/agency-setup.mjs';
 async function setupFixture(t){
  const f=await fixture(t,{uac:true});
  f.database.exec(await readFile(new URL('../cloudflare/agency-setup-schema.sql',import.meta.url),'utf8'));
+ f.database.exec(await readFile(new URL('../cloudflare/maintenance-schema.sql',import.meta.url),'utf8'));
  Object.assign(f.env,{AGENCY_BROWSER_SETUP:'1',INSTALLATION_MODE:'agency',INSTALLATION_ID:'a'.repeat(32),APP_ORIGIN:origin,DIAGNOSTICS_ENABLED:'1',SCHEMA_REQUIRED:'4',PHOTOS:{get:async()=>null}});
  const ticket='B'.repeat(43),password='Synthetic setup password only';
  f.database.prepare('INSERT INTO agency_setup VALUES(1,?,?,?,NULL)').run(f.env.INSTALLATION_ID,setupDigest(ticket),Date.now()+600000);
@@ -69,6 +70,26 @@ test('bootstrap throttles bad tickets globally and an interrupted hash never con
  for(let i=0;i<7;i++)assert.equal((await f.submit({ticket:'C'.repeat(43)})).status,403);
  assert.equal((await f.submit()).status,429);
  t.mock.timers.setTime(Date.now()+60001);assert.equal((await f.submit()).status,200);
+});
+
+test('Administrator update UI/API verifies signed releases, binds approval to current account/build and seals configuration to an agency-only key',async t=>{
+ const f=await setupFixture(t);await f.submit();f.env.APP_BUILD='1'.repeat(40);
+ const signer=generateKeyPairSync('ed25519'),rsa=generateKeyPairSync('rsa',{modulusLength:3072}),publicKey={...rsa.publicKey.export({format:'jwk'}),alg:'RSA-OAEP-256'};
+ const manifest=Buffer.from(JSON.stringify({edition:'cloudflare',version:'0.2.1',build:'2'.repeat(40),schema:4,from:['0.2.0'],fromSchemas:[4],migration:'additive',artifactSha256:'3'.repeat(64),notes:'Synthetic update notes'}));
+ Object.assign(f.env,{UPDATE_MANIFEST:manifest.toString('base64'),UPDATE_SIGNATURE:sign(null,manifest,signer.privateKey).toString('base64'),UPDATE_PUBLIC_KEY:signer.publicKey.export({type:'spki',format:'pem'})});
+ assert.equal((await f.request('/api/staff/maintenance')).status,401);
+ const cookie=session(await f.signIn('first-admin',f.password));
+ const status=await(await f.request('/api/staff/maintenance',{cookie})).json();assert.equal(status.available.version,'0.2.1');assert.equal(status.installed.build,f.env.APP_BUILD);
+ const body={manifestSha256:status.available.manifestSha256,publicKey,recoverySaved:true,confirm:true};
+ assert.equal((await f.request('/api/staff/maintenance',{method:'POST',cookie,body:{...body,recoverySaved:false}})).status,400);
+ const r=await f.request('/api/staff/maintenance',{method:'POST',cookie,body});assert.equal(r.status,201);const id=(await r.json()).id;
+ const row=f.database.prepare('SELECT * FROM maintenance_requests').get();assert.equal(row.administrator,'first-admin');assert.equal(row.revision,1);assert.equal(row.from_build,f.env.APP_BUILD);assert.ok(!row.secret_backup.includes(f.env.GUEST_CODE_KEY));assert.ok(!row.public_key.includes('"d":'));
+ await f.request('/api/staff/accounts',{cookie,method:'POST',body:{username:'synthetic-editor',password:editorPassword,role:'editor'}});const staff=session(await f.signIn('synthetic-editor',editorPassword));assert.equal((await f.request('/api/staff/maintenance',{cookie:staff})).status,403);
+ f.database.prepare('INSERT INTO maintenance_lock VALUES(1,?,?)').run(id,Date.now());
+ assert.equal((await f.request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}})).status,503);
+ assert.equal((await f.signIn('first-admin',f.password)).status,200);
+ assert.equal((await f.request('/api/staff/maintenance',{cookie,method:'DELETE',body:{id}})).status,200);assert.ok(f.database.prepare('SELECT revoked FROM maintenance_requests').get().revoked);
+ assert.ok(f.database.prepare('SELECT event FROM maintenance_history').all().some(r=>r.event.includes('revoked')));
 });
 
 const origin = 'https://synthetic-test.workers.dev';

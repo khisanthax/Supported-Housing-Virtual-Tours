@@ -1,6 +1,7 @@
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {normalizeUsername,usernamePattern,validNewStaffPassword} from './staff-password.mjs';
 import {release} from './release.mjs';
+import {maintenanceReady} from './maintenance.mjs';
 
 export const setupDigest=token=>createHash('sha256').update(token).digest('hex');
 const tokenPattern=/^[A-Za-z0-9_-]{43}$/;
@@ -39,6 +40,7 @@ export async function agencySetup(request,env,derivePassword){
  if(!usernamePattern.test(username)||!validNewStaffPassword(input.password))return response({error:'Choose a username of 3–64 lowercase letters, numbers, dots, dashes or underscores, and a password of at least 15 characters (maximum 256 UTF-8 bytes).'},400);
  const schema=await query('SELECT COUNT(*) n,MIN(version) minimum,MAX(version) maximum FROM app_migrations').first();
  if(schema?.n!==release.schema||schema.minimum!==1||schema.maximum!==release.schema)return response({error:'Database preparation is incomplete. Return to the deployment wizard and retry.'},503);
+ if(!await maintenanceReady(db))return response({error:'Installation recovery preparation is incomplete. Return to the deployment wizard and retry.'},503);
  const {verifier}=await derivePassword(input.password);
  input.password='';input.ticket='';
  // One D1 statement checks the ticket, deadline and empty account table again.

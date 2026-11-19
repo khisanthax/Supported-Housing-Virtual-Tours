@@ -25,3 +25,7 @@ cloudflare/cloudflare/
 **/.wrangler/
 
 local/generated/
+*.lt360backup
+*.lt360release
+*PRIVATE*.json
+*.key
