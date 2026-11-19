@@ -27,6 +27,8 @@ The reference compared sensor-only blending, corrected blending, single-source s
 
 ## Stanford comparison
 
+For subsequent tests on the same ceiling fixture and chair, see [Ceiling fixture and chair alignment](LOCAL-ALIGNMENT.md).
+
 Stanford describes a structured 37-position capture sequence. Its documented WebGL2 renderer projects photos by direction, compensates for exposure, selects a preferred source for much of the sphere and blends in fallback regions. It also fills polar gaps. Stanford reports moving away from an earlier OpenCV.js approach after iOS memory problems. Choosing one source can reduce translucent duplicates while leaving a jump where two misaligned images meet. Our reference used an independent OpenCV graph-cut experiment. We did not run Stanford's app on this private archive.
 
 - [Stanford VFTCam overview](https://vftcam.stanford.edu/)
