@@ -1,0 +1,22 @@
+Subject: Set up your agency’s LevelTwo360 website
+
+Hello,
+
+LevelTwo360 lets your team create private 360° apartment tours and share selected apartments with invited guests.
+
+Your agency controls its own installation, staff accounts and apartment content. Cloudflare provides the hosting account. Its Workers Free plan is the target for this pilot, so no paid plan is required. Free usage limits apply and can stop service if exceeded; this is not unlimited hosting.
+
+Deploy LevelTwo360
+[INSERT THE OWNER-APPROVED HTTPS AGENCY SETUP LINK AFTER RELEASE ACCEPTANCE]
+
+The link guides you through creating or signing in to your own Cloudflare account, authorizing setup and creating your first LevelTwo360 Administrator. Cloudflare handles its own sign-in. Do not send us your Cloudflare password, API keys or Administrator password.
+
+You do not need to install software, use a terminal, copy an API key or manage a GitHub repository. Setup does not add a payment method or upgrade your plan.
+
+When setup finishes, save the website address and setup summary. Sign in to create individual staff accounts and choose their permissions and apartment access. Please complete the synthetic test and encrypted-backup restoration check before adding approved agency content.
+
+If you need help, contact your agreed support contact through your agency’s approved channel. Include the approximate time and operation reference when available. Do not attach passwords, authorization links, access keys, raw photographs or backups to an ordinary support request.
+
+Thank you.
+
+Publisher note — remove before sending: this is an unsent template. The hosted setup link, publisher OAuth client, independent live acceptance and complete update workflow are not yet approved/released. Do not substitute the reference Deploy to Cloudflare button URL; it is not configured as a working LevelTwo360 installation flow.

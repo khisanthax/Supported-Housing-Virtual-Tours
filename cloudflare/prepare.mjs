@@ -8,6 +8,7 @@ async function put(name,bytes) {
   await writeFile(url,bytes);
 }
 const copy = async (from,to) => put(to,await readFile(new URL(from,root)));
+for(const name of ['agency-setup.html','agency-setup.js','agency-setup.css','maintenance.html','maintenance.js'])await copy('cloudflare/'+name,'sharing/'+name);
 const common = ['styles.css','app.js','tour-data.js','room-grid.js','builder-data.js','layout-state.js','graph-tour.js','vendor/marzipano.js'];
 const index = await readFile(new URL('dist/index.html',root),'utf8');
 const guestViewer = index.replace('<body>','<body data-guest="true">')
@@ -213,6 +214,7 @@ linksScript=linksScript.replace('refresh().catch(e=>say(e.message));',`refresh()
   }
 }).catch(e=>say(e.message));`);
 await put('sharing/staff.js',linksScript);
+if(process.env.LEVELTWO360_NO_DEV_VARS!=='1'){
 const vars = new URL('./.dev.vars',import.meta.url);
 let settings = '';
 try { settings = await readFile(vars,'utf8'); }
@@ -222,6 +224,7 @@ if (!/^GUEST_CODE_KEY=/m.test(settings)) settings += `\nGUEST_CODE_KEY=${randomB
 if (!/^STAFF_RANDOM_HASH=/m.test(settings)) settings += `\nSTAFF_RANDOM_HASH=${staffHash}\n`;
 if (!/^LOCAL_SYNTHETIC_ONLY=/m.test(settings)) settings += '\nLOCAL_SYNTHETIC_ONLY=1\n';
 await writeFile(vars,settings.replace(/^STAFF_(?:SALT|VERIFIER)=.*\r?\n/gm,''));
+}
 await copy('cloudflare/staff-accounts.html','sharing/staff-accounts.html');
 await copy('cloudflare/staff-accounts.js','sharing/staff-accounts.js');
 

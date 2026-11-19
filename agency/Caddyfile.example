@@ -1,0 +1,10 @@
+# Prepared only. Starting this configuration publishes a host and requests TLS
+# certificates; obtain owner authorization and use the approved existing host.
+{$AGENCY_HOSTNAME} {
+    log {
+        output discard
+    }
+    header Referrer-Policy no-referrer
+    header X-Content-Type-Options nosniff
+    reverse_proxy 127.0.0.1:4198
+}

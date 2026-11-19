@@ -1,0 +1,33 @@
+{
+  "checked": "2026-11-19",
+  "source": "https://api.cloudflare.com/client/v4/oauth/scopes",
+  "scopes": [
+    {
+      "name": "Account Settings Read",
+      "id": "account-settings.read",
+      "category": "account_and_billing",
+      "scopes": []
+    },
+    {
+      "name": "D1 Write",
+      "id": "d1.write",
+      "category": "developer_platform",
+      "scopes": []
+    },
+    {
+      "name": "Workers KV Storage Write",
+      "id": "workers-kv-storage.write",
+      "category": "developer_platform",
+      "scopes": []
+    },
+    {
+      "name": "Workers Scripts Write",
+      "id": "workers-scripts.write",
+      "category": "developer_platform",
+      "scopes": []
+    }
+  ],
+  "unavailable": [
+    "Billing Read"
+  ]
+}
