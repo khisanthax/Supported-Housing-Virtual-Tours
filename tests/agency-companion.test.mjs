@@ -35,7 +35,7 @@ async function companion(t,{deploy=async()=>({ready:true,website:'https://synthe
  const request=(path,{cookie='',body,method=body?'POST':'GET',requestOrigin=origin}={})=>fetch(origin+path,{method,redirect:'manual',headers:{Cookie:cookie,Origin:requestOrigin,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  const begin=async()=>{const r=await request('/oauth/start');assert.equal(r.status,303);const auth=new URL(r.headers.get('Location'));assert.equal(auth.origin,'https://dash.cloudflare.com');assert.equal(auth.searchParams.get('code_challenge_method'),'S256');assert.ok(!auth.search.includes('client_secret'));return {cookie:r.headers.get('Set-Cookie').split(';')[0],state:auth.searchParams.get('state')};};
  const connect=async()=>{const b=await begin();const r=await request('/oauth/callback?state='+b.state+'&code=synthetic-code',{cookie:b.cookie});assert.equal(r.status,303);return r.headers.get('Set-Cookie').split(';')[0];};
- return {request,begin,connect,get exchange(){return exchange;},get revocations(){return revocations;}};
+ return {origin,request,begin,connect,get exchange(){return exchange;},get revocations(){return revocations;}};
 }
 
 test('OAuth binds state to browser, rejects replay, rotates cookies and never returns tokens',async t=>{
@@ -120,13 +120,21 @@ test('failed Free preflight performs no provisioning mutations',async()=>{
 
 test('connected update entry point checks account scope, serializes jobs, revokes authorization and protects backup downloads',async t=>{
  const {mkdir,writeFile}=await import('node:fs/promises'),{createHash}=await import('node:crypto');
- const dir=await mkdtemp(join(tmpdir(),'lt360-companion-update-'));t.after(()=>rm(dir,{recursive:true,force:true}));const id='d'.repeat(32),install='f'.repeat(32),name='synthetic-agency',directory=join(dir,account,name),file='snapshot-'+'1'.repeat(16)+'.lt360backup',content=Buffer.from('Synthetic encrypted snapshot fixture');await mkdir(join(directory,'updates',id),{recursive:true});await writeFile(join(directory,'installation.json'),JSON.stringify({account,name,installation:install,database:'synthetic-db'}));await writeFile(join(directory,'updates',id,file),content);
+ const dir=await mkdtemp(join(tmpdir(),'lt360-companion-update-'));t.after(()=>rm(dir,{recursive:true,force:true}));const id='d'.repeat(32),install='f'.repeat(32),name='synthetic-agency',directory=join(dir,account,name),file='snapshot-'+'1'.repeat(16)+'.lt360backup',content=Buffer.alloc(16*1024*1024,0xa5);await mkdir(join(directory,'updates',id),{recursive:true});await writeFile(join(directory,'installation.json'),JSON.stringify({account,name,installation:install,database:'synthetic-db'}));await writeFile(join(directory,'updates',id,file),content);
  let releaseJob;const gate=new Promise(r=>releaseJob=r);let calls=0;
  const f=await companion(t,{stateDirectory:dir,releaseBundle:{bytes:Buffer.from('{}'),signature:Buffer.alloc(64)},apiFactory:()=>async(path,opt)=>{if(path==='/accounts?per_page=50')return [{id:account,name:'Synthetic agency'}];assert.match(path,/synthetic-db\/query$/);assert.equal(opt.body.params.at(-1),install);return [{success:true,results:opt.body.sql.includes('backup_file')?[{backup_file:file,backup_digest:createHash('sha256').update(content).digest('hex')}]:[{id,version:'0.2.1',phase:'approved'}]}];},updater:async options=>{calls++;assert.equal(options.directory,directory);assert.equal(options.requestId,id);await gate;return {phase:'complete',website:'https://synthetic.example.workers.dev',requestId:id,backupAvailable:true};}});
  const cookie=await f.connect(),body={account,name,requestId:id};
  assert.equal((await f.request('/api/updates/start',{cookie,body:{...body,account:other}})).status,403);
  assert.equal((await f.request('/api/updates/list',{cookie,body})).status,200);
- assert.equal((await f.request('/api/updates/backup',{cookie,body})).status,200);
+ const form=(fields,source=f.origin)=>fetch(f.origin+'/api/updates/backup',{method:'POST',headers:{Cookie:cookie,Origin:source},body:new URLSearchParams(fields)});
+ assert.equal((await form({...body,account:other})).status,403);
+ assert.equal((await form(body,'https://other.invalid')).status,403);
+ const interrupted=await form(body);await interrupted.body.cancel();
+ const retry=await form(body);assert.equal(retry.headers.get('Cache-Control'),'no-store');
+ assert.ok(retry.headers.get('Content-Disposition').includes('LevelTwo360-encrypted-installation.lt360backup'));
+ const checksum=createHash('sha256');for await(const chunk of retry.body)checksum.update(chunk);
+ assert.equal(checksum.digest('hex'),createHash('sha256').update(content).digest('hex'));
+ await writeFile(join(directory,'updates',id,file),'damaged');assert.equal((await form(body)).status,409);
  assert.equal((await f.request('/api/updates/backup?token=anything')).status,404);
  assert.equal((await f.request('/api/updates/start',{cookie,body})).status,202);assert.equal((await f.request('/api/updates/start',{cookie,body})).status,409);assert.equal(calls,1);releaseJob();
  for(let i=0;i<20;i++){if(!(await(await f.request('/api/state',{cookie})).json()).running)break;await new Promise(r=>setTimeout(r,5));}

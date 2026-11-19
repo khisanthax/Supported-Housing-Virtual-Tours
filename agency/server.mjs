@@ -27,7 +27,7 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
  const timer=setInterval(expire,30000);timer.unref();
  const send=(res,status,value,extra={})=>{res.writeHead(status,{...headers,'Content-Type':'application/json',...extra});res.end(JSON.stringify(value));};
  const redirect=(res,path,extra={})=>{res.writeHead(303,{...headers,Location:path,...extra});res.end();};
- const read=async req=>{let n=0,body='';for await(const part of req){n+=part.length;if(n>2048)throw new SetupError('The form is too large.');body+=part;}return JSON.parse(body);};
+ const read=async (req,form=false)=>{let n=0,body='';for await(const part of req){n+=part.length;if(n>2048)throw new SetupError('The form is too large.');body+=part;}return form?Object.fromEntries(new URLSearchParams(body)):JSON.parse(body);};
  const server=createServer(async(req,res)=>{
   try{
    expire();const url=new URL(req.url,origin);
@@ -54,7 +54,8 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
     return redirect(res,auth.href,{'Set-Cookie':cookie(session)});
    }
    if(req.method==='GET'&&url.pathname==='/oauth/callback'){
-    if(!s||!s.state||s.deadline<=now()||url.searchParams.get('state')!==s.state)return send(res,403,{error:'This Cloudflare sign-in has expired or does not belong to this browser. Return to setup and reconnect.'});
+    if(!s||!s.state||s.deadline<=now()){res.writeHead(403,{...headers,'Content-Type':'text/html; charset=utf-8'});return res.end('<!doctype html><html lang="en"><title>Reconnect to Cloudflare</title><main><h1>Sign-in expired</h1><p>Your installation is preserved.</p><a href="/oauth/start">Reconnect to Cloudflare</a></main></html>');}
+    if(url.searchParams.get('state')!==s.state)return send(res,403,{error:'Sign-in could not be verified. Return to setup and reconnect.'});
     delete s.state;
     const code=url.searchParams.get('code');if(!code||code.length>4096){delete s.verifier;return redirect(res,'/?authorization=failed');}
     const r=await fetcher('https://dash.cloudflare.com/oauth2/token',{method:'POST',redirect:'error',signal:AbortSignal.timeout(30000),headers:oauthHeaders,body:new URLSearchParams({grant_type:'authorization_code',client_id:clientId,redirect_uri:callback,code,code_verifier:s.verifier})});
@@ -71,11 +72,12 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
    }
    if(url.pathname==='/api/state'&&req.method==='GET')return send(res,200,{connected:!!s?.accessToken,accounts:s?.accounts?.map(a=>({id:a.id,name:a.name}))??[],running:!!s?.running,progress:s?.progress??'',error:s?.error??'',result:s?.result??null,updateRequests:s?.updateRequests??[],updatesConfigured:!!releaseBundle,freeVerificationAvailable:verifiedFreePlanIds.length>0});
    if(req.method==='POST'&&url.pathname.startsWith('/api/')){
-    if(req.headers.origin!==origin||req.headers['content-type']!=='application/json')return send(res,403,{error:'Use the deployment form on this website.'});
+    const downloadForm=url.pathname==='/api/updates/backup' && req.headers['content-type']?.split(';')[0]==='application/x-www-form-urlencoded';
+    if(req.headers.origin!==origin||(!downloadForm && req.headers['content-type']!=='application/json'))return send(res,403,{error:'Use the deployment form on this website.'});
     if(!s||s.deadline<=now())return send(res,401,{error:'Reconnect to Cloudflare to continue. Your installation is preserved.'});
     if(url.pathname.startsWith('/api/updates/')){
      if(!s.accessToken)return send(res,401,{error:'Reconnect to Cloudflare to inspect or update your installation.'});
-     const input=await read(req),{account,name,requestId}=input;
+     const input=await read(req,downloadForm),{account,name,requestId}=input;
      if(!identifier.test(account)||!s.accounts?.some(a=>a.id===account)||!installationName.test(name))return send(res,403,{error:'Select an authorized account and original installation name.'});
      const directory=join(stateDirectory,account,name),api=apiFactory(s.accessToken,fetcher);
      if(url.pathname==='/api/updates/list'){
@@ -87,10 +89,10 @@ export function createCompanion({origin,clientId,clientSecret,scopes,stateDirect
       const query=installationQueries(api,state),row=(await query('SELECT backup_digest,backup_file FROM maintenance_requests WHERE id=? AND installation=?',[requestId,state.installation]))[0];
       if(!row?.backup_digest||!/^snapshot-[a-f0-9]{16}\.lt360backup$/.test(row.backup_file??''))return send(res,404,{error:'A verified encrypted backup is not available.'});
       const path=join(directory,'updates',requestId,row.backup_file),hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);if(hash.digest('hex')!==row.backup_digest)return send(res,409,{error:'Backup integrity could not be verified. Ask an authorized infrastructure operator to review it.'});
-      res.writeHead(200,{...headers,'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"','X-Backup-SHA256':row.backup_digest});createReadStream(path).on('error',()=>res.destroy()).pipe(res);return;
+      res.writeHead(200,{...headers,'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="LevelTwo360-encrypted-installation.lt360backup"','X-Backup-SHA256':row.backup_digest});const stream=createReadStream(path);res.once('close',()=>stream.destroy());stream.on('error',()=>res.destroy()).pipe(res);return;
      }
      if(url.pathname==='/api/updates/start'){
-      if(!releaseBundle)return send(res,503,{error:'The publisher has not configured a verified release and trust key.'});
+      // A stranded terminal request can be reconciled from its verified deployment and journal even if the catalog changed.
       const key=account+':'+name;if(s.running||locks.has(key))return send(res,409,{error:'This installation already has a running job.'});locks.add(key);s.running=true;delete s.result;delete s.error;
       s.job=(async()=>{try{s.result=await updater({account,name,directory,requestId,api,run:runnerFactory({token:s.accessToken,account}),releaseBundle,verifiedFreePlanIds,fetcher,progress:text=>s.progress=text});}catch(e){s.error=e instanceof SetupError?e.message:'The update stopped safely. Inspect its history and reconnect to the same installation to recover.';}finally{s.revoked=await revoke(s);if(s.result)s.result.revoked=s.revoked;s.running=false;locks.delete(key);s.deadline=now()+10*60000;}})();
       return send(res,202,{started:true});

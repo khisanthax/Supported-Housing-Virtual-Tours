@@ -3,6 +3,21 @@ const $=id=>document.getElementById(id);
 let ticket=location.hash.slice(1);history.replaceState(null,'',location.pathname);
 $('website').textContent='Your website: '+location.origin;
 if(!/^[A-Za-z0-9_-]{43}$/.test(ticket)){$('setup').hidden=true;$('message').textContent='Return to the deployment wizard to authorize setup, or open /staff if your Administrator account already exists.';}
+async function resume(){
+ $('setup').hidden=true;$('resume').hidden=false;
+ const health=await fetch('/api/installation-health').then(r=>r.json()).catch(()=>({}));
+ if(health.ready){
+  $('intro').querySelector('h1').textContent='Your installation is ready';
+  $('message').textContent='Sign in with your existing agency account.';
+ }else{
+  $('intro').querySelector('h1').textContent='Reconnect to finish setup';
+  $('message').textContent='Reopen your original deployment invitation and choose the same installation to get a fresh setup link.';
+  if(health.companion && new URL(health.companion).protocol==='https:'){
+   $('resume-link').href=new URL(health.companion).origin;$('resume-link').textContent='Return to deployment wizard';
+  }else $('resume').hidden=true;
+ }
+}
+if(!/^[A-Za-z0-9_-]{43}$/.test(ticket))resume();
 let summary='';
 $('setup').addEventListener('submit',async event=>{
  event.preventDefault();const button=event.submitter;
@@ -11,7 +26,7 @@ $('setup').addEventListener('submit',async event=>{
  try{
   const r=await fetch('/api/agency-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket,username:$('username').value,password:$('password').value})});
   const data=await r.json();
-  if(!r.ok){if(data.complete){ticket='';$('setup').hidden=true;}$('message').textContent=data.error;return;}
+  if(!r.ok){if(data.complete||r.status===403){ticket='';await resume();return;}$('message').textContent=data.error;return;}
   ticket='';$('setup').reset();$('setup').hidden=true;$('intro').hidden=true;$('message').textContent='';$('success').hidden=false;
   $('address').textContent=data.website;
   summary=`LevelTwo360 setup summary\nWebsite: ${data.website}\nAdministrator username: ${data.username}\nVersion: ${data.version}\nCompleted: ${new Date().toISOString()}\n\nSign in at ${data.website}/staff\nCreate accounts in Manage staff accounts. Assign permissions and apartment access.\nKeep encrypted apartment backups and store their passwords separately.\nHelp: ${data.website}/staff/help\nSupport: use Diagnostics; never share passwords or Cloudflare credentials.\nThis summary contains no passwords or deployment credentials.\n`;

@@ -19,7 +19,7 @@ export function installationQueries(api,state){
 export async function readUpdateRequests({directory,api}){
  const state=JSON.parse(await readFile(join(directory,'installation.json'),'utf8'));
  const query=installationQueries(api,state);
- return {state,requests:await query('SELECT id,version,created,expires,revoked,phase,message,backup_digest FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 25',[state.installation])};
+ return {state,requests:await query('SELECT id,version,created,expires,revoked,phase,message,backup_digest, EXISTS(SELECT 1 FROM maintenance_lock WHERE request=maintenance_requests.id) AS owns_lock FROM maintenance_requests WHERE installation=? ORDER BY owns_lock DESC,created DESC LIMIT 25',[state.installation])};
 }
 
 export async function runInstallationUpdate({account,name,directory,requestId,api,run,releaseBundle,verifiedFreePlanIds,fetcher=fetch,progress=()=>{},checkpoint=async()=>{}}){
@@ -48,29 +48,73 @@ export async function runInstallationUpdate({account,name,directory,requestId,ap
  const journalPath=join(jobDirectory,'job.json');let journal;
  try{journal=JSON.parse(await readFile(journalPath,'utf8'));}catch(e){if(e.code!=='ENOENT')throw new SetupError('The private update journal needs operator review.');}
  if(journal){if(journal.installation!==state.installation||journal.requestId!==requestId||journal.fromBuild!==request.from_build||journal.manifest!==request.manifest_digest)throw new SetupError('The saved update journal does not match this installation and approval.');installed.version=journal.fromVersion;installed.schema=journal.fromSchema;}
- const candidate=verifiedUpdate({...releaseBundle,installed});
- if(request.manifest_digest!==candidate.manifestSha256||request.version!==candidate.version||sha256(releaseBundle.artifact)!==candidate.artifactSha256)throw new SetupError('The approved release or its artifact changed. A new Administrator review is required.');
+ if(!terminal.has(request.phase) && !releaseBundle)throw new SetupError('A verified release is required to resume this update.');
+ const candidate=terminal.has(request.phase)?null:verifiedUpdate({...releaseBundle,installed});
+ if(candidate && (request.manifest_digest!==candidate.manifestSha256||request.version!==candidate.version||sha256(releaseBundle.artifact)!==candidate.artifactSha256))throw new SetupError('The approved release or its artifact changed. A new Administrator review is required.');
  const authorize=async()=>{const row=await get();const admin=(await query("SELECT revision FROM staff_accounts WHERE username=? AND role='administrator' AND disabled=0",[row?.administrator]))[0];if(!row||row.revoked||row.expires<=Date.now()||admin?.revision!==row.revision||row.from_build!==request.from_build)throw new SetupError('Update approval expired, was revoked, or its Administrator changed.');return row;};
  const setPhase=async phase=>{request.phase=phase;await query('UPDATE maintenance_requests SET phase=?,message=? WHERE id=?',[phase,phaseMessage[phase],requestId]);await query('INSERT INTO maintenance_history(request,actor,event,created) VALUES(?,?,?,?)',[requestId,'infrastructure',phaseMessage[phase],Date.now()]);progress(phaseMessage[phase]);await saveJournal(journalPath,journal);await checkpoint(phase);};
- const unlock=()=>query('DELETE FROM maintenance_lock WHERE id=1 AND request=?',[requestId]);
+ // A single guarded UPDATE fires both the history insert and lock release in
+ // the same SQLite transaction. Install on demand for older agency schemas.
+ const finish = async (phase, repair = false) => {
+  const expected = phase === 'complete' ? journal?.targetVersion : journal?.previousVersion;
+  if (!expected || await activeVersion() !== expected)
+   throw new SetupError('Editing remains paused. Check the active deployment and resume this request.');
+  const live = await health();
+  const valid = phase === 'complete'
+   ? live.version === request.version && (candidate ? live.build === candidate.build && live.schema === candidate.schema : live.schema >= journal.fromSchema && (!journal.targetBuild || live.build === journal.targetBuild))
+   : live.build === request.from_build && live.version === journal.fromVersion && live.schema >= journal.fromSchema;
+  if (!live.ready || !valid) throw new SetupError('Editing remains paused until the expected website version is healthy.');
+  await query(`CREATE TRIGGER IF NOT EXISTS lt360_finish_update_v1 AFTER UPDATE OF phase ON maintenance_requests
+   WHEN NEW.phase IN ('complete','recovered') AND EXISTS(SELECT 1 FROM maintenance_lock WHERE id=1 AND request=NEW.id)
+   BEGIN
+    INSERT INTO maintenance_history(request,actor,event,created)
+     SELECT NEW.id,'infrastructure',NEW.message,CAST(strftime('%s','now') AS INTEGER)*1000
+     WHERE OLD.phase<>NEW.phase OR NOT EXISTS(SELECT 1 FROM maintenance_history WHERE request=NEW.id AND event=NEW.message);
+    DELETE FROM maintenance_lock WHERE id=1 AND request=NEW.id;
+   END`);
+  await checkpoint('before-'+phase);
+  const requireApproval = phase==='complete' && !repair;
+  const rows = await query(`UPDATE maintenance_requests SET phase=?,message=? WHERE id=? AND installation=?
+   AND EXISTS(SELECT 1 FROM maintenance_lock WHERE id=1 AND request=?)
+   AND (?=0 OR (revoked IS NULL AND expires>? AND EXISTS(SELECT 1 FROM staff_accounts
+    WHERE username=administrator AND staff_accounts.revision=maintenance_requests.revision AND role='administrator' AND disabled=0))) RETURNING id`,
+   [phase,phaseMessage[phase],requestId,state.installation,requestId,Number(requireApproval),Date.now()]);
+  if (!rows.length) throw new SetupError('The lock or approval changed. Review the request before continuing.');
+  progress(phaseMessage[phase]);
+  await checkpoint(phase);
+ };
  const deployVersion=version=>api(base+'/deployments',{method:'POST',body:{strategy:'percentage',versions:[{version_id:version,percentage:100}],annotations:{'workers/message':'LevelTwo360 '+requestId},code_update_strategy:{mode:'immediate'}}});
- const recover=async()=>{await setPhase('recovering');const current=await activeVersion();if(current!==journal.previousVersion&&current!==journal.targetVersion)throw new SetupError('Another deployment appeared during recovery. Editing remains paused; an infrastructure operator must review it.');if(current!==journal.previousVersion)await deployVersion(journal.previousVersion);const restored=await health();if(!restored.ready||restored.build!==request.from_build)throw new SetupError('Previous code health could not be verified.');await setPhase('recovered');await unlock();};
- if(terminal.has(request.phase))return {phase:request.phase,website:state.origin,requestId,backupAvailable:!!request.backup_digest};
+ const recover=async()=>{await setPhase('recovering');const current=await activeVersion();if(current!==journal.previousVersion&&current!==journal.targetVersion)throw new SetupError('Another deployment appeared during recovery. Editing remains paused; an infrastructure operator must review it.');if(current!==journal.previousVersion)await deployVersion(journal.previousVersion);const restored=await health();if(!restored.ready||restored.build!==request.from_build)throw new SetupError('Previous code health could not be verified.');await finish('recovered');};
+ if (terminal.has(request.phase)) {
+  const owner = (await query('SELECT request FROM maintenance_lock WHERE id=1'))[0];
+  if (owner && owner.request !== requestId) throw new SetupError('Another update owns the editing lock. Resume that request.');
+  if (owner) await finish(request.phase, true);
+  return {phase:request.phase,website:state.origin,requestId,backupAvailable:!!request.backup_digest};
+ }
  if(!journal){await authorize();if(initial.build!==request.from_build||!initial.ready)throw new SetupError('The installed build or its health changed. Review a new update approval.');if(candidate.schema>Number(value('SCHEMA_COMPATIBLE_MAX')??initial.schema))throw new SetupError('This schema exceeds the installed code recovery range. A separately reviewed compatibility upgrade is required.');journal={installation:state.installation,requestId,fromVersion:initial.version,fromSchema:initial.schema,fromBuild:request.from_build,previousVersion:await activeVersion(),manifest:candidate.manifestSha256};await saveJournal(journalPath,journal);}
  const locked=await query('INSERT INTO maintenance_lock(id,request,created) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET request=excluded.request WHERE maintenance_lock.request=excluded.request RETURNING request',[requestId,Date.now()]);
  if(!locked.length)throw new SetupError('Another update owns this installation. Resume that job first.');
  if(['deploying','verifying','recovering','operator-recovery-required'].includes(request.phase)){
   const active=await activeVersion();
-  if(active===journal.targetVersion){try{await authorize();const live=await health();if(live.ready&&live.build===candidate.build&&live.version===candidate.version&&live.schema===candidate.schema){await setPhase('complete');await unlock();return {phase:'complete',website:state.origin,requestId,backupAvailable:true};}}catch{} }
+  if(active===journal.targetVersion && journal.snapshot?.photoInventoryVerified){try{await authorize();const live=await health();if(live.ready&&live.build===candidate.build&&live.version===candidate.version&&live.schema===candidate.schema){await finish('complete');return {phase:'complete',website:state.origin,requestId,backupAvailable:true};}}catch(error){if(error?.simulatedCrash)throw error;} }
   // A lost activation response is observed, never blindly repeated. Recover
   // retained code before asking for a new approval or retrying activation.
-  try{await recover();return {phase:'recovered',website:state.origin,requestId,backupAvailable:!!request.backup_digest};}catch{await setPhase('operator-recovery-required');throw new SetupError('Recovery could not be confirmed. Editing remains paused. Reconnect to the same job or ask an authorized infrastructure operator to inspect retained versions.');}
+  try{await recover();return {phase:'recovered',website:state.origin,requestId,backupAvailable:!!request.backup_digest};}catch(recoveryError){if(recoveryError?.simulatedCrash)throw recoveryError;await setPhase('operator-recovery-required');throw new SetupError('Recovery could not be confirmed. Editing remains paused. Reconnect to the same job or ask an authorized infrastructure operator to inspect retained versions.');}
  }
  try{
   await authorize();await setPhase('preparing');
-  if(!journal.snapshot){
+  if(!journal.snapshot?.photoInventoryVerified){
    await setPhase('backing-up');const file='snapshot-'+randomBytes(8).toString('hex')+'.lt360backup';
-   const snapshot=await createSnapshot({path:join(jobDirectory,file),publicKey:JSON.parse(request.public_key),query,configuration:{state,settings,secretEnvelope:JSON.parse(request.secret_backup)},listImages:async function*(){let cursor='';const seen=new Set();do{const path=`/accounts/${account}/storage/kv/namespaces/${state.namespace}/keys?limit=1000`+(cursor?'&cursor='+encodeURIComponent(cursor):'');const page=await api.page(path);if(!Array.isArray(page.result))throw new SetupError('The KV inventory response is unsupported.');for(const entry of page.result){if(seen.has(entry.name))throw new SetupError('The image inventory changed during backup.');seen.add(entry.name);yield entry;}cursor=page.result_info?.cursor??'';if(page.result.length>=1000&&!cursor)throw new SetupError('KV pagination must be verified before backing up this many objects.');}while(cursor);},readImage:key=>api.binary(`/accounts/${account}/storage/kv/namespaces/${state.namespace}/values/${encodeURIComponent(key)}`)});
+   let lastReport=0;
+   const onProgress=async(stage,done,total)=>{
+    if(stage!=='verify' && Date.now()-lastReport<3000)return;
+    lastReport=Date.now();
+    await authorize();
+    const message=stage==='verify'?'Restoring the backup to verify records and '+total+' images':'Backing up images: '+done+' of '+total;
+    progress(message);
+    await query('UPDATE maintenance_requests SET message=? WHERE id=?',[message,requestId]);
+   };
+   const snapshot=await createSnapshot({onProgress,path:join(jobDirectory,file),publicKey:JSON.parse(request.public_key),query,configuration:{state,settings,secretEnvelope:JSON.parse(request.secret_backup)},listImages:async function*(){let cursor='';const seen=new Set();do{const path=`/accounts/${account}/storage/kv/namespaces/${state.namespace}/keys?limit=1000`+(cursor?'&cursor='+encodeURIComponent(cursor):'');const page=await api.page(path);if(!Array.isArray(page.result))throw new SetupError('The KV inventory response is unsupported.');for(const entry of page.result){if(seen.has(entry.name))throw new SetupError('The image inventory changed during backup.');seen.add(entry.name);yield entry;}cursor=page.result_info?.cursor??'';}while(cursor);},readImage:key=>api.binary(`/accounts/${account}/storage/kv/namespaces/${state.namespace}/values/${encodeURIComponent(key)}`)});
    journal.snapshot={...snapshot,file};await saveJournal(journalPath,journal);await query('UPDATE maintenance_requests SET backup_digest=?,backup_file=?,previous_version=? WHERE id=?',[snapshot.sha256,file,journal.previousVersion,requestId]);
   }else{if(!/^snapshot-[a-f0-9]{16}\.lt360backup$/.test(journal.snapshot.file))throw new SetupError('Invalid backup journal.');const check=createHash('sha256');for await(const chunk of createReadStream(join(jobDirectory,journal.snapshot.file)))check.update(chunk);if(check.digest('hex')!==journal.snapshot.sha256||(request.backup_digest&&request.backup_digest!==journal.snapshot.sha256))throw new SetupError('The encrypted backup changed. No update will be activated.');}
   await query('UPDATE maintenance_requests SET backup_digest=?,backup_file=?,previous_version=? WHERE id=?',[journal.snapshot.sha256,journal.snapshot.file,journal.previousVersion,requestId]);
@@ -88,7 +132,7 @@ export async function runInstallationUpdate({account,name,directory,requestId,ap
    const versions=array(await api(base+'/versions'));
    const found=versions.find(v=>(v.annotations??v.metadata?.annotations)?.['workers/message']==='LT360-update-'+requestId);
    if(!found?.id)throw new SetupError('The staged version could not be identified. No activation was requested.');
-   journal.targetVersion=found.id;journal.migrations=unpacked.migrations;await saveJournal(journalPath,journal);await query('UPDATE maintenance_requests SET target_version=? WHERE id=?',[found.id,requestId]);
+   journal.targetVersion=found.id;journal.targetBuild=candidate.build;journal.migrations=unpacked.migrations;await saveJournal(journalPath,journal);await query('UPDATE maintenance_requests SET target_version=? WHERE id=?',[found.id,requestId]);
   }
   await setPhase('staged');await authorize();
   const needed=(journal.migrations??[]).filter(m=>m.version>journal.fromSchema);
@@ -98,10 +142,13 @@ export async function runInstallationUpdate({account,name,directory,requestId,ap
   await authorize();if(await activeVersion()!==journal.previousVersion)throw new SetupError('Another deployment changed the expected version.');
   await setPhase('deploying');await deployVersion(journal.targetVersion);await setPhase('verifying');
   const live=await health();if(!live.ready||live.version!==candidate.version||live.build!==candidate.build||live.schema!==candidate.schema)throw new SetupError('The updated version did not pass health checks.');
-  await authorize();await setPhase('complete');await unlock();return {phase:'complete',website:state.origin,requestId,backupAvailable:true};
+  await authorize();await finish('complete');return {phase:'complete',website:state.origin,requestId,backupAvailable:true};
  }catch(error){
   if(error?.simulatedCrash)throw error;
-  try{await recover();}catch{await setPhase('operator-recovery-required');throw new SetupError('Update stopped and code recovery could not be verified. Editing remains paused. Resume this exact update with fresh Cloudflare authorization.');}
+  // A failed HTTP response does not imply that the terminal transaction failed.
+  const saved=await get();
+  if(saved?.phase==='complete' && !(await query('SELECT request FROM maintenance_lock WHERE id=1')).length) return {phase:'complete',website:state.origin,requestId,backupAvailable:!!saved.backup_digest};
+  try{await recover();}catch(recoveryError){if(recoveryError?.simulatedCrash)throw recoveryError;await setPhase('operator-recovery-required');throw new SetupError('Update stopped and code recovery could not be verified. Editing remains paused. Resume this exact update with fresh Cloudflare authorization.');}
   const reason=error instanceof SetupError||error instanceof SnapshotError?error.message:'A technical step could not be verified.';
   const message='Update stopped: '+reason+' Previous code is verified and current data and secrets are retained.';
   await query('UPDATE maintenance_requests SET message=? WHERE id=?',[message,requestId]);

@@ -88,7 +88,16 @@ test('Administrator update UI/API verifies signed releases, binds approval to cu
  f.database.prepare('INSERT INTO maintenance_lock VALUES(1,?,?)').run(id,Date.now());
  assert.equal((await f.request('/api/staff/apartments',{cookie,method:'POST',body:{tour:blankApartment(),photos:{}}})).status,503);
  assert.equal((await f.signIn('first-admin',f.password)).status,200);
- assert.equal((await f.request('/api/staff/maintenance',{cookie,method:'DELETE',body:{id}})).status,200);assert.ok(f.database.prepare('SELECT revoked FROM maintenance_requests').get().revoked);
+ const previousFetch=globalThis.fetch;let catalogCalls=0;
+ f.env.AGENCY_COMPANION_ORIGIN='https://catalog.invalid';f.env.UPDATE_CATALOG_URL=f.env.AGENCY_COMPANION_ORIGIN+'/releases/latest';
+ globalThis.fetch=async()=>{catalogCalls++;throw Error('Catalog unavailable');};
+ try{
+  const status=await(await f.request('/api/staff/maintenance?view=status',{cookie})).json();
+  assert.equal(status.request.id,id);assert.equal(status.history,undefined);assert.equal(status.requests,undefined);
+  assert.equal((await f.request('/api/staff/maintenance',{cookie,method:'DELETE',body:{id}})).status,200);
+  assert.equal(catalogCalls,0);
+ }finally{globalThis.fetch=previousFetch;}
+ assert.ok(f.database.prepare('SELECT revoked FROM maintenance_requests').get().revoked);
  assert.ok(f.database.prepare('SELECT event FROM maintenance_history').all().some(r=>r.event.includes('revoked')));
 });
 

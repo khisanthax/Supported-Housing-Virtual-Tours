@@ -37,17 +37,26 @@ export async function maintenanceApi({request,env,db,account,sessionHash,body={}
  if(account.role!=='administrator')return result({error:'An active Administrator account is required.'},403);
  const q=(sql,...args)=>db.prepare(sql).bind(...args);
  const installed={...release,build:env.APP_BUILD??release.version,installation:env.INSTALLATION_ID};
- const lock=await q('SELECT request FROM maintenance_lock WHERE id=1').first();
- let candidate=null,notice='No verified compatible update is available.';
- try{candidate=await availableUpdate(env,installed);if(candidate)notice='Review this release before approving it.';}catch{notice='The update description could not be verified. No update can be approved.';}
- const path=new URL(request.url).pathname;
- if(request.method==='GET')return result({installed,available:candidate?{version:candidate.version,build:candidate.build,schema:candidate.schema,notes:candidate.notes,manifestSha256:candidate.manifestSha256}:null,notice,locked:!!lock,companion:env.AGENCY_COMPANION_ORIGIN??null,requests:(await q('SELECT id,administrator,from_build,version,created,expires,revoked,phase,message,backup_digest FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 50',env.INSTALLATION_ID).all()).results,history:(await q('SELECT request,actor,event,created FROM maintenance_history ORDER BY id DESC LIMIT 100').all()).results});
  if(request.method==='DELETE'){
   if(!/^[a-f0-9]{32}$/.test(body.id??''))return result({error:'Select an update request.'},400);
   const row=await q('UPDATE maintenance_requests SET revoked=? WHERE id=? AND installation=? AND revoked IS NULL RETURNING id',Date.now(),body.id,env.INSTALLATION_ID).first();
   if(row)await q('INSERT INTO maintenance_history(request,actor,event,created) VALUES(?,?,?,?)',row.id,account.username,'Update approval revoked',Date.now()).run();
   return result({ok:true});
  }
+ const url=new URL(request.url),path=url.pathname;
+ const lock=await q('SELECT request FROM maintenance_lock WHERE id=1').first();
+ const fields='id,version,created,expires,revoked,phase,message,backup_digest,json_extract(public_key,\'$.n\') AS modulus';
+ if(request.method==='GET' && url.searchParams.get('view')==='history'){
+  return result({requests:(await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 50',env.INSTALLATION_ID).all()).results,history:(await q('SELECT event,created FROM maintenance_history ORDER BY id DESC LIMIT 100').all()).results});
+ }
+ if(request.method==='GET' && url.searchParams.get('view')==='status'){
+  const row=lock?await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? AND id=?',env.INSTALLATION_ID,lock.request).first():
+   await q('SELECT '+fields+' FROM maintenance_requests WHERE installation=? ORDER BY created DESC LIMIT 1',env.INSTALLATION_ID).first();
+  return result({locked:!!lock,request:row??null});
+ }
+ let candidate=null,notice='No verified compatible update is available.';
+ try{candidate=await availableUpdate(env,installed);if(candidate)notice='Review this release before approving it.';}catch{notice='The update description could not be verified. Try again later.';}
+ if(request.method==='GET')return result({installed,available:candidate?{version:candidate.version,build:candidate.build,schema:candidate.schema,notes:candidate.notes,manifestSha256:candidate.manifestSha256}:null,notice,companion:env.AGENCY_COMPANION_ORIGIN??null});
  if(request.method!=='POST'||path!=='/api/staff/maintenance')return result({error:'Not found.'},404);
  if(lock)return result({error:'An update or recovery is already in progress. Review its progress before starting another.'},409);
  if(!candidate||body.manifestSha256!==candidate.manifestSha256||body.confirm!==true||body.recoverySaved!==true)return result({error:'Review the verified release and save your private backup recovery file before approving.'},400);

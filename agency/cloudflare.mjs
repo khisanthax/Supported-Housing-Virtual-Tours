@@ -33,7 +33,13 @@ export function cloudflareApi(token,fetcher=fetch){
  };
  const api=async(...args)=>(await request(...args)).result;
  api.page=request;
- api.binary=async path=>{const r=await fetcher('https://api.cloudflare.com/client/v4'+path,{headers:{Authorization:'Bearer '+token},redirect:'error',signal:AbortSignal.timeout(30000)});if(!r.ok)throw new SetupError('An image could not be backed up with this authorization.');return r.arrayBuffer();};
+ api.binary=async path=>{const r=await fetcher('https://api.cloudflare.com/client/v4'+path,{headers:{Authorization:'Bearer '+token},redirect:'error',signal:AbortSignal.timeout(30000)});if(!r.ok){
+  const error=new SetupError('Image storage could not complete the backup read.');
+  const wait=Number(r.headers.get('retry-after')??0);
+  error.retryable=(r.status===404||r.status===429||r.status>=500)&&Number.isFinite(wait)&&wait<=5;
+  error.retryDelay=Math.max(0,wait*1000);
+  throw error;
+ }return r.arrayBuffer();};
  return api;
 }
 

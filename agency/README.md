@@ -102,3 +102,11 @@ Extraction writes a new SQLite database, exact image bytes/index and a PRIVATE c
 Suggested Cloudflare support question (not sent): “Which supported self-managed OAuth scope authorizes GET /accounts/{account_id}/subscriptions, or which documented read-only endpoint authoritatively distinguishes Workers Free from Paid? The current /oauth/scopes catalog exposes the four resource scopes listed above but no Billing Read. We must not enable billing or ask agencies to copy API keys.”
 
 Follow [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md). Phase 1 cannot be declared complete until the plan-verification path and approved hosted acceptance close. Phase 2 is therefore still deferred; this branch creates no temporary support account or support access/backdoor, and Local Only remains device-local.
+
+### Update recovery and performance
+
+Terminal status and history commit with release of the matching editing lock in one D1 statement using a trigger. The companion checks the actual active version and website health before finalizing. Resume an older terminal job with a stranded lock from its installation in the deployment wizard. A different lock owner or deployment requires operator review.
+
+The snapshot records every ready D1 photo even if KV omits its key from a listing. It reads at most three images at once, retries temporary failures within a bounded window, and checks required lengths again against the restored database. Incomplete reservations may lack an object. Existing v1 backups keep their format. An incomplete older snapshot fails verification if a required image is missing.
+
+Run `node agency/snapshot-benchmark.mjs 64 30` for a synthetic 64-image, 64 MiB snapshot with 30 ms per image read. This times the backup portion of maintenance. It excludes OAuth, deployment and real provider latency. A binary encoding could remove much of the double base64 expansion (113.8 MiB on 64 MiB of images), but would require a second authenticated reader and coordinated offline recovery-tool rollout. This iteration keeps recovery compatibility and reduces the measured pause through bounded reads.

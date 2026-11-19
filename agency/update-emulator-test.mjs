@@ -42,6 +42,13 @@ try{
  assert.equal(result.phase,'complete');assert.equal(activations,1);assert.equal(active,'candidate');assert.deepEqual((await db.prepare('SELECT username,password_verifier,role,revision FROM staff_accounts ORDER BY username').all()).results,credentialsBefore.results);assert.deepEqual(Buffer.from(await kv.get(photo,'arrayBuffer')),image);
  const health=await(await check('/api/installation-health',200)).json();assert.equal(health.version,'0.2.1');assert.equal(health.schema,5);assert.equal(health.build,toBuild);assert.equal(health.ready,true);
  const receipt=await db.prepare('SELECT backup_file FROM maintenance_requests WHERE id=?').bind(approval.id).first(),restored=await verifySnapshot(join(directory,'updates',approval.id,receipt.backup_file),{privateKey:recovery.privateKey.export({format:'jwk'}),onImage:async(name,bytes)=>{assert.equal(name,photo);assert.deepEqual(bytes,image);}});assert.equal(restored.database.prepare('SELECT COUNT(*) n FROM staff_accounts').get().n,2);restored.database.close();
+ const staff=(await check('/api/staff/sign-in',200,{method:'POST',body:{username:'synthetic-staff',password:'Synthetic retained staff password'}})).headers.get('Set-Cookie').split(';')[0];
+ const tour=JSON.parse(await readFile(new URL('../cloudflare/sample.json',import.meta.url),'utf8'));
+ const photos={};for(const room of tour.rooms){
+  const bytes=await readFile(new URL('../cloudflare/sample-images/'+room.id+'.jpg',import.meta.url));
+  photos[room.id]=(await(await check('/api/staff/photos',201,{method:'POST',cookie:staff,type:'image/jpeg',body:bytes})).json()).id;
+ }
+ await check('/api/staff/apartments',201,{method:'POST',cookie:staff,body:{tour,photos}});
  // The retained real old code remains able to write after the additive schema.
  active='previous';await check('/api/staff/accounts',201,{method:'POST',cookie,body:{username:'synthetic-after-recovery',role:'editor',password:'Synthetic recovered code password'}});assert.equal((await(await check('/api/installation-health',200)).json()).ready,true);
  console.log('Native update acceptance passed: signed Administrator approval, agency-key sealed secret, real D1/KV encrypted/restored snapshot, maintenance write denial, staged activation, additive schema, preserved credentials/JPEGs, target health and retained-code recovery compatibility. Cloudflare control plane is simulated; no remote account or billing operation.');

@@ -79,3 +79,45 @@ test('conflicting additive schema and changed Durable Object binding are not ove
 test('revocation after activation triggers retained-code recovery before reporting completion',async t=>{
  const f=await fixture(t);f.options.checkpoint=async phase=>{if(phase==='verifying')f.db.prepare('UPDATE maintenance_requests SET revoked=?').run(Date.now());};await assert.rejects(runInstallationUpdate(f.options),/previous code/i);assert.deepEqual(f.deployments,['synthetic-next-version','synthetic-previous-version']);assert.equal(f.db.prepare('SELECT phase FROM maintenance_requests').get().phase,'recovered');
 });
+
+for(const phase of ['complete','recovered']){
+ for(const point of ['before-'+phase,phase]){
+  test('restart at '+point+' finalizes once and permits writes',async t=>{
+   const f=await fixture(t);f.failHealth=phase==='recovered';
+   f.options.checkpoint=async name=>{if(name===point)throw {simulatedCrash:true};};
+   await assert.rejects(runInstallationUpdate(f.options));f.options.checkpoint=async()=>{};
+   for(let i=0;i<2;i++)assert.equal((await runInstallationUpdate(f.options)).phase,phase);
+   const events=f.db.prepare("SELECT count(*) n FROM maintenance_history WHERE event=(SELECT message FROM maintenance_requests)").get().n;
+   assert.equal(events,1);assert.equal(f.db.prepare('SELECT count(*) n FROM maintenance_lock').get().n,0);
+   f.db.exec("UPDATE staff_accounts SET revision=revision+1 WHERE username='synthetic-staff'");
+   assert.equal(f.deployments.length,phase==='complete'?1:2);
+  });
+ }
+ test('older stranded '+phase+' lock is repaired only for verified deployment',async t=>{
+  const f=await fixture(t);f.failHealth=phase==='recovered';
+  if(phase==='recovered')await assert.rejects(runInstallationUpdate(f.options));else await runInstallationUpdate(f.options);
+  f.db.prepare('INSERT INTO maintenance_lock VALUES(1,?,0)').run(requestId);
+  f.active='external-change';
+  await assert.rejects(runInstallationUpdate(f.options),/paused/);
+  assert.equal(f.db.prepare('SELECT request FROM maintenance_lock').get().request,requestId);
+  f.active=phase==='complete'?'synthetic-next-version':'synthetic-previous-version';
+  assert.equal((await runInstallationUpdate(f.options)).phase,phase);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM maintenance_lock').get().n,0);
+ });
+}
+for(const mode of ['omitted','temporary','absent','length','incomplete']){
+ test('photo coverage: '+mode,async t=>{
+  const f=await fixture(t);f.options.api.page=async()=>({result:[]});
+  if(mode==='incomplete')f.db.exec('UPDATE photos SET ready=0');
+  let reads=0;
+  f.options.api.binary=async()=>{reads++;if(mode==='absent'||mode==='temporary'&&reads===1)throw Error('missing');return Buffer.alloc(mode==='length'?3:4);};
+  if(['absent','length'].includes(mode)){
+   await assert.rejects(runInstallationUpdate(f.options),/required apartment photo/);
+   assert.equal(f.deployments.length,0);assert.equal(f.db.prepare('SELECT backup_digest FROM maintenance_requests').get().backup_digest,null);
+  }else{
+   assert.equal((await runInstallationUpdate(f.options)).phase,'complete');
+   assert.equal(reads,mode==='temporary'?2:mode==='incomplete'?0:1);
+  }
+  assert.equal(f.db.prepare('SELECT count(*) n FROM maintenance_lock').get().n,0);
+ });
+}

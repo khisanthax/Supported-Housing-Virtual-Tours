@@ -188,7 +188,7 @@ async function route(request,env,privateStaffOnly,diag=null) {
       const maximum=Number(env.SCHEMA_COMPATIBLE_MAX??release.schema);
       const recoveryReady=await maintenanceReady(env.DB.withSession('first-primary'));
       const prepared=recoveryReady&&ledger.n===ledger.maximum&&ledger.minimum===1&&ledger.maximum>=release.schema&&ledger.maximum<=maximum&&typeof env.PHOTOS?.get==='function'&&typeof env.STAFF_LOGIN?.getByName==='function';
-      return output({prepared,ready:prepared&&!!setup?.completed,maintenanceProtocol:recoveryReady?1:0,version:release.version,build:env.APP_BUILD??release.version,schema:ledger.maximum??0});
+      return output({companion:env.AGENCY_COMPANION_ORIGIN,prepared,ready:prepared&&!!setup?.completed,maintenanceProtocol:recoveryReady?1:0,version:release.version,build:env.APP_BUILD??release.version,schema:ledger.maximum??0});
     }
     if(!setup?.completed)fail(503,'Agency setup is not complete. Return to the deployment wizard to finish.');
   }
