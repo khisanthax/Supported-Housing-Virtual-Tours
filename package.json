@@ -2,6 +2,13 @@
   "name": "supported-housing-walkthrough",
   "private": true,
   "type": "module",
+  "cloudflare": {
+    "bindings": {
+      "LT360_INSTALL_KEY": {
+        "description": "Create a unique temporary setup key with your password manager (at least 24 random characters). Save it for the next step. After the build succeeds, open **Visit** or your **workers.dev** website and enter this key to create your Administrator. The setup window lasts 60 minutes from database initialization."
+      }
+    }
+  },
   "scripts": {
     "start": "node scripts/serve.mjs",
     "start:sharing": "node scripts/guest-server.mjs",

@@ -27,3 +27,4 @@ for (const args of [['d1','migrations','apply','DB','--remote'],['deploy']]){
     process.exit(result.status??1);
   }
 }
+console.log('LevelTwo360 is online. Open the workers.dev address printed above, or choose Visit in Cloudflare. On your first visit, enter your temporary setup key to create your Administrator.');

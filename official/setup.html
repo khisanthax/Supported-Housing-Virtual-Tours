@@ -2,18 +2,19 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up LevelTwo360</title><link rel="stylesheet" href="/official/setup.css"><script type="module" src="/official/setup.js"></script></head>
 <body><main>
 <h1>Set up LevelTwo360</h1>
-<section id="configure"><h2>Confirm you control this Cloudflare Worker</h2>
+<p>Your agency website is online. Enter the temporary key you saved in Cloudflare, then choose the username and password you will use to sign in.</p>
+<details id="configure"><summary>I lost my key or setup expired</summary>
 <p>In your Cloudflare dashboard, open <strong>Workers &amp; Pages</strong>, select this Worker, then open <strong>Settings → Variables and Secrets</strong>. Add a variable named <code>LT360_SETUP_CODE</code> with type <strong>Secret</strong>. Use the code generated below as its value and deploy the settings. The code expires after 30 minutes.</p>
 <button type="button" id="generate">Generate setup code</button>
 <input id="generated" type="text" readonly hidden aria-label="Generated setup code">
-</section>
+</details>
 <form id="setup"><h2>Create the first Administrator</h2>
-<label>Setup code<input name="code" required type="password" autocomplete="off"></label>
+<label>Temporary setup key<input name="code" required type="password" autocomplete="off"></label>
 <label>Username<input name="username" required minlength="3" maxlength="64" autocomplete="username"></label>
 <label>Password<input name="password" required minlength="15" maxlength="256" type="password" autocomplete="new-password"></label>
 <label>Repeat password<input name="confirmation" required minlength="15" maxlength="256" type="password" autocomplete="new-password"></label>
 <button>Create Administrator</button>
 </form>
 <p id="message" role="status"></p>
-<section id="ready" hidden><h2>LevelTwo360 is ready</h2><p>Remove the setup code from your Worker’s secrets and save this site address in your agency records.</p><p><a href="/staff">Sign in to LevelTwo360</a></p><p><a href="/staff/help">Administrator help</a></p></section>
+<section id="ready" hidden><h2>LevelTwo360 is ready</h2><p>Your setup key has been used. Bookmark this website and sign in with your new Administrator account.</p><p><a href="/staff">Sign in to LevelTwo360</a></p><p><a href="/staff/help">Administrator help</a></p></section>
 </main></body></html>

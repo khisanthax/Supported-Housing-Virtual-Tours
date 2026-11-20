@@ -24,6 +24,13 @@ function validCode(configured, submitted, now) {
   return timingSafeEqual(digest(configured), digest(submitted));
 }
 
+function matchesInstallKey(configured, submitted) {
+  if (typeof configured !== 'string' || !/^[!-~]{24,128}$/.test(configured) ||
+      typeof submitted !== 'string' || submitted.length !== configured.length) return false;
+  const digest = value => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(configured), digest(submitted));
+}
+
 async function readSetup(request, url) {
   if (request.headers.get('Origin') !== url.origin || request.headers.get('Content-Type') !== 'application/json') return null;
   const reader = request.body?.getReader();
@@ -44,7 +51,11 @@ async function readSetup(request, url) {
 async function enroll(request, env, url, derivePassword, db) {
   const input = await readSetup(request, url);
   if (!input) return answer({error:'Open the setup form on this website.'}, 400);
-  if (!validCode(env.LT360_SETUP_CODE, input.code, Date.now()))
+  const deployKey = matchesInstallKey(env.LT360_INSTALL_KEY, input.code);
+  const deadline = deployKey
+    ? (await db.prepare('SELECT expires FROM official_setup_window WHERE id=1').first())?.expires
+    : Number(codePattern.exec(env.LT360_SETUP_CODE || '')?.[2]);
+  if (!(deadline > Date.now()) || (!deployKey && !validCode(env.LT360_SETUP_CODE, input.code, Date.now())))
     return answer({error:'The setup code is invalid or expired. Save a fresh code in this Worker’s Cloudflare settings.'}, 403);
   const username = normalizeUsername(input.username);
   if (!usernamePattern.test(username) || !validNewStaffPassword(input.password))
@@ -55,13 +66,14 @@ async function enroll(request, env, url, derivePassword, db) {
   // or neither is. The unique claim ID prevents a losing request creating a user.
   await env.PHOTOS.get('__lt360_binding_health__');
   const committedAt = Date.now();
-  if (!validCode(env.LT360_SETUP_CODE, input.code, committedAt))
+  if (deadline <= committedAt)
     return answer({error:'The setup code expired. Save a fresh code in Cloudflare.'}, 403);
   const results = await db.batch([
     db.prepare(`INSERT INTO official_installation(id,installation_id,origin,guest_key,created)
       SELECT 1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM official_installation)
-      AND NOT EXISTS (SELECT 1 FROM staff_accounts) AND NOT EXISTS (SELECT 1 FROM official_restore)`)
-      .bind(installation, url.origin, randomBytes(32).toString('hex'), committedAt),
+      AND NOT EXISTS (SELECT 1 FROM staff_accounts) AND NOT EXISTS (SELECT 1 FROM official_restore)
+      AND unixepoch('subsec')*1000 < ?`)
+      .bind(installation, url.origin, randomBytes(32).toString('hex'), committedAt, deadline),
     db.prepare(`INSERT INTO staff_accounts(username,password_verifier,role)
       SELECT ?,?,'administrator' WHERE EXISTS (SELECT 1 FROM official_installation WHERE id=1 AND installation_id=?)`)
       .bind(username, verifier, installation)

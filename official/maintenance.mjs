@@ -20,7 +20,7 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const name = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const digest = /^[a-f0-9]{64}$/;
 const quote = value => '"' + value.replaceAll('"','""') + '"';
-const skip = new Set(['official_installation','official_restore','app_migrations','sessions','staff_sessions','firebase_staff_sessions','attempts','diagnostic_operations','diagnostic_daily']);
+const skip = new Set(['official_installation','official_restore','official_setup_window','app_migrations','sessions','staff_sessions','firebase_staff_sessions','attempts','diagnostic_operations','diagnostic_daily']);
 const parentOrder = ['staff_accounts','firebase_staff_accounts','photos','shares'];
 const initialRows = {
   uploads_gallery: [{id:1,apartments:'[]',revision:0,changed_by:'migration',changed_at:0}],
@@ -98,7 +98,7 @@ export async function backUp(site,{path,publicKey}){
   if (!claimed.length) throw new MaintenanceError('The agency installation is already in maintenance.');
   try {
     const schema=await snapshotSchema(query);
-    for (const table of schema.filter(item=>item.type==='table'&&!['official_installation','official_restore','app_migrations'].includes(item.name))) {
+    for (const table of schema.filter(item=>item.type==='table'&&!['official_installation','official_restore','official_setup_window','app_migrations'].includes(item.name))) {
       if (!['insert','update','delete'].every(operation=>schema.some(item=>item.type==='trigger'&&item.name==='official_backup_'+table.name+'_'+operation)))
         throw new MaintenanceError('A database table is missing its backup write barrier. Update the maintenance tool and migration first.');
     }

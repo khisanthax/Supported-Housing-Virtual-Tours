@@ -15,7 +15,7 @@ const vars=cfg.vars;
 const origin='https://synthetic-agency.test-account.workers.dev';
 const restoredOrigin='https://synthetic-recovery.test-account.workers.dev';
 const setupCode=()=>randomBytes(32).toString('base64url')+'.'+(Date.now()+1500000);
-const code=setupCode(),otherCode=setupCode();
+const code=randomBytes(32).toString('base64url'),otherCode=setupCode();
 const password='Synthetic setup test password only';
 const bundle=join(path,'bundle');
 const migrationPath=join(root,'official','migrations');
@@ -95,23 +95,26 @@ try {
   await mkdir(bundle);
   wrangler('deploy','--dry-run','--config','wrangler.jsonc','--outdir',bundle);
   const source=await readFile(join(bundle,'worker.js'),'utf8');
-  const first=runtime(source,{...vars,LT360_SETUP_CODE:code});resources.push(first);
+  const first=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(first);
   const second=runtime(source,{...vars,LT360_SETUP_CODE:otherCode});resources.push(second);
   const disabled=runtime(source,vars);resources.push(disabled);
-  const expired=runtime(source,{...vars,LT360_SETUP_CODE:randomBytes(32).toString('base64url')+'.'+(Date.now()-1000)});resources.push(expired);
+  const expired=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(expired);
   const site=await toSite(first,origin), target=await toSite(second,restoredOrigin);
   await prepare(site.db);await prepare(target.db);
   await prepare(await disabled.getD1Database('DB'));await prepare(await expired.getD1Database('DB'));
   assert.equal((await expect(first,origin,'/',303)).headers.get('Location'),'/setup');
-  assert.match(await (await expect(first,origin,'/setup',200)).text(),/Confirm you control this Cloudflare Worker/);
+  assert.match(await (await expect(first,origin,'/setup',200)).text(),/temporary key you saved in Cloudflare/);
   await expect(first,origin,'/official/setup.js',200);
   await expect(first,origin,'/api/staff/accounts',503);
   await expect(first,origin,'/api/official/enroll',403,{method:'POST',body:{code:otherCode,username:'outsider',password}});
   await expect(disabled,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
-  await expect(expired,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
   await expect(first,origin,'/api/official/enroll',400,{method:'POST',source:'https://outside.example',body:{code,username:'outsider',password}});
   assert.equal((await site.query('SELECT count(*) n FROM staff_accounts'))[0].n,0);
   assert.equal((await site.query('SELECT count(*) n FROM official_installation'))[0].n,0);
+  const expiredDb=await expired.getD1Database('DB');
+  await expiredDb.exec('UPDATE official_setup_window SET expires=0');
+  await prepare(expiredDb);
+  await expect(expired,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
   const raced=await Promise.all(['owner','other'].map(username=>send(first,origin,'/api/official/enroll',{method:'POST',body:{code,username,password}})));
   assert.deepEqual(raced.map(item=>item.status).sort(),[200,409]);
   const admin=(await site.query('SELECT username FROM staff_accounts'))[0].username;
@@ -228,7 +231,7 @@ try {
   await expect(first,origin,'/api/staff/drafts/'+apartment.id,200,{cookie:rolledBackCookie});
   if(process.argv.includes('--browser')){
     const {chromium}=await import('playwright');
-    const runner=runtime(source,{...vars,LT360_SETUP_CODE:code});resources.push(runner);
+    const runner=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(runner);
     await prepare(await runner.getD1Database('DB'));
     const browser=await chromium.launch();
     try{
@@ -244,9 +247,12 @@ try {
         });
         return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:Buffer.from(await response.arrayBuffer())});
       });
-      await page.goto(origin+'/setup');
-      await page.getByRole('button',{name:'Generate setup code'}).click();
-      assert.match(await page.locator('#generated').inputValue(),/^[A-Za-z0-9_-]{43}\.\d{13}$/);
+      const landing=await runner.dispatchFetch(origin+'/',{redirect:'manual'});
+      assert.equal(landing.status,303);
+      assert.equal(landing.headers.get('Location'),'/setup');
+      await page.goto(new URL(landing.headers.get('Location'),origin).href);
+      assert.equal(await page.locator('#configure').getAttribute('open'),null);
+
       await page.locator('input[name=code]').fill(code);
       await page.getByLabel('Username').fill('browser-owner');
       await page.getByLabel('Password',{exact:true}).fill(password);

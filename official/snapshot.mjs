@@ -6,7 +6,7 @@ export class SnapshotError extends Error{}
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const encode=value=>Buffer.from(value).toString('base64');
 const identifier=value=>'"'+String(value).replaceAll('"','""')+'"';
-const transient=name=>['sessions','staff_sessions','firebase_staff_sessions','attempts','official_restore','diagnostic_operations','diagnostic_daily'].includes(name);
+const transient=name=>['sessions','staff_sessions','firebase_staff_sessions','attempts','official_setup_window','official_restore','diagnostic_operations','diagnostic_daily'].includes(name);
 const cell=value=>value instanceof Uint8Array||Array.isArray(value)?{blob:encode(value)}:value;
 const uncell=value=>value&&typeof value==='object'&&typeof value.blob==='string'?Buffer.from(value.blob,'base64'):value;
 
