@@ -1,0 +1,11 @@
+body {margin:0;font:1rem/1.55 system-ui;color:#172f3b;background:#eef5f3}
+main {max-width:42rem;padding:1.5rem;margin:auto;background:white}
+section,form {margin-block:1.5rem}
+label,input {display:block}
+input {font:inherit;padding:.55rem;width:100%;box-sizing:border-box;border:1px solid #667777;margin:.25rem 0 .8rem}
+[hidden] {display:none}
+button {background:#18594c;color:white;font:inherit;padding:.6rem 1rem;border:0;border-radius:.3rem}
+button:disabled {opacity:.65}
+a {color:#155b4c}
+:focus-visible {outline:3px solid #a44f00;outline-offset:2px}
+code {overflow-wrap:anywhere}

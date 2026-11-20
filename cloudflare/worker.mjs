@@ -1,4 +1,5 @@
 import {release} from './release.mjs';
+import {officialRequest} from './official-installation.mjs';
 import {createDiagnostic,storeDiagnostic,diagnosticQuery,validateClientEvents,newTrace,tracePattern} from './diagnostics.mjs';
 import { uploadsApi } from './uploads-api.mjs';
 import { assertAdditiveUpload } from '../dist/uploads-data.js';
@@ -141,7 +142,13 @@ async function handleRequest(request,env,privateStaffOnly=false) {
   }
 }
 
-export default { fetch: (request,env) => handleRequest(request,env) };
+export default {
+  fetch(request,env) {
+    if (env.OFFICIAL_DEPLOY !== '1') return handleRequest(request,env);
+    return officialRequest(request,env,handleRequest,
+      password=>derivePassword(env,new URL(request.url),'hash',{password}));
+  }
+};
 
 export class StaffLogin {
   constructor(_state,env) {
@@ -149,6 +156,8 @@ export class StaffLogin {
   }
 
   fetch(request) {
+    if (this.env.OFFICIAL_DEPLOY === '1' && new URL(request.url).origin !== passwordWorkOrigin)
+      return officialRequest(request,this.env,(r,e)=>handleRequest(r,e,true),null,true);
     return handleRequest(request,this.env,true);
   }
 }
