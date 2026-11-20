@@ -112,12 +112,16 @@ try {
   assert.equal((await site.query('SELECT count(*) n FROM staff_accounts'))[0].n,0);
   assert.equal((await site.query('SELECT count(*) n FROM official_installation'))[0].n,0);
   const expiredDb=await expired.getD1Database('DB');
+  const initialExpiry=(await expiredDb.prepare('SELECT expires FROM official_setup_window').first()).expires;
+  assert.ok(initialExpiry>Date.now()+59*60000 && initialExpiry<=Date.now()+60*60000);
   await expiredDb.exec('UPDATE official_setup_window SET expires=0');
   await prepare(expiredDb);
   await expect(expired,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
   const raced=await Promise.all(['owner','other'].map(username=>send(first,origin,'/api/official/enroll',{method:'POST',body:{code,username,password}})));
   assert.deepEqual(raced.map(item=>item.status).sort(),[200,409]);
   const admin=(await site.query('SELECT username FROM staff_accounts'))[0].username;
+  assert.ok(!JSON.stringify(await site.query('SELECT * FROM staff_accounts')).includes(password));
+  assert.ok(!JSON.stringify(await site.query('SELECT * FROM official_installation')).includes(code));
   assert.equal((await site.query('SELECT count(*) n FROM staff_accounts'))[0].n,1);
   await expect(first,restoredOrigin,'/staff',403);
   await expect(second,restoredOrigin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});

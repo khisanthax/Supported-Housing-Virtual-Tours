@@ -1,5 +1,15 @@
 # Development log
 
+## Deployment-time setup key and website handoff · 20 November 2026
+
+Read-only checks on the isolated installation: the Worker overview showed **Visit ↗** and the full linked workers.dev hostname. Following Visit opened the website root and landed on **Set up LevelTwo360** at `/setup`. The previously observed successful recovery build printed the workers.dev URL and ended with **Success: Build completed**. The earlier button-only run failed during seed clone, so we have no evidence of a distinct fresh-install success page or its controls.
+
+Cloudflare documents deployment-time Worker secret declarations through dotenv examples and binding descriptions through package metadata. Its template interface documents no custom completion-button or redirect option. Verified that the actual authenticated Deploy form for this revision displayed a blank `LT360_INSTALL_KEY` input. Left it unsubmitted. Agency instructions use the native Visit link or the address in the build output, followed by automatic routing on the agency website. The deploy command also prints those instructions after Wrangler succeeds.
+
+The template declares an empty secret, with the agency choosing its own random setup key. A one-time migration records a 60-minute deadline in D1. Requests use a timing-safe comparison and check the deadline again at the atomic Administrator claim. Replaying migrations leaves the original deadline intact. After enrollment the setup endpoint closes, including when the binding remains present. Cloudflare owns secret retention; the app never receives account-wide credentials to delete it. The existing dashboard-owner recovery procedure is available under a disclosure for a lost or expired key. It retains its separate 30-minute lifetime.
+
+Local verification: 97 unit tests and local Workers/D1/KV/SQLite Durable Object acceptance, including mobile Chromium at 390 px, passed. Covered missing and wrong keys, expiration after migration retry, simultaneous claims, single-use closure, root redirect, sign-in, redeployment and backup/restore. Live delivery of the new secret and a clean button-only success remain unverified. The generator checks a public default-branch tree before issuing an invitation. The remaining fresh-template action requires approval to make the reviewed tree available as a public default branch. No production deployment or change to Option B.
+
 ## Deploy-button credential and fresh-template verification · 20 November 2026
 
 Reviewed Cloudflare's [Deploy-button fields](https://developers.cloudflare.com/workers/platform/deploy-buttons/) and [Worker secret bindings](https://developers.cloudflare.com/workers/configuration/secrets/). Neither provides a documented one-shot input for the first Administrator password. A failed clone may prevent all application cleanup. Password fields were therefore kept out of the template, and enrollment continues on the agency Worker.

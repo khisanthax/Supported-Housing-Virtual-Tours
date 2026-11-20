@@ -56,7 +56,7 @@ async function enroll(request, env, url, derivePassword, db) {
     ? (await db.prepare('SELECT expires FROM official_setup_window WHERE id=1').first())?.expires
     : Number(codePattern.exec(env.LT360_SETUP_CODE || '')?.[2]);
   if (!(deadline > Date.now()) || (!deployKey && !validCode(env.LT360_SETUP_CODE, input.code, Date.now())))
-    return answer({error:'The setup code is invalid or expired. Save a fresh code in this Worker’s Cloudflare settings.'}, 403);
+    return answer({error:'Check the temporary key you saved during deployment. If you lost it or the hour has passed, open “I lost my key or setup expired”.'}, 403);
   const username = normalizeUsername(input.username);
   if (!usernamePattern.test(username) || !validNewStaffPassword(input.password))
     return answer({error:'Use a valid username and a password of at least 15 characters and at most 256 UTF-8 bytes.'},400);
