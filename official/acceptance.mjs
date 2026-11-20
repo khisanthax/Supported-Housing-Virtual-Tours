@@ -77,7 +77,16 @@ try {
   assert.throws(()=>execFileSync(process.execPath,['official/deploy.mjs'],{cwd:root,stdio:'pipe',windowsHide:true}),error=>
     error.status===1 && error.stderr.toString().includes('stopped before contacting Cloudflare'));
   const template='https://github.com/synthetic-owner/synthetic-template';
-  const button=execFileSync(process.execPath,['official/deploy-link.mjs',template],{cwd:root,encoding:'utf8',windowsHide:true});
+  const {verifiedButton}=await import('./deploy-link.mjs');
+  const tree='a'.repeat(40);
+  const publicHead=async url=>{
+    assert.equal(url,'https://api.github.com/repos/synthetic-owner/synthetic-template/commits/HEAD');
+    return Response.json({commit:{tree:{sha:tree}}});
+  };
+  const button=await verifiedButton(template,tree,publicHead);
+  await assert.rejects(verifiedButton(template+'/tree/codex%2Fofficial-deploy',tree,publicHead),/repository root/);
+  await assert.rejects(verifiedButton(template,'b'.repeat(40),publicHead),/differ/);
+  await assert.rejects(verifiedButton(template,tree,async()=>new Response(null,{status:404})),/404/);
   assert.equal(new URL(button.trim().match(/\]\((https:\/\/deploy\.workers\.cloudflare\.com\/\?.*)\)$/)[1]).searchParams.get('url'),template);
   // These are the same migration files the official production command uses.
   const local=['d1','migrations','apply','DB','--local','--persist-to',join(path,'d1'), '--config','wrangler.jsonc'];
@@ -101,6 +110,8 @@ try {
   await expect(disabled,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
   await expect(expired,origin,'/api/official/enroll',403,{method:'POST',body:{code,username:'outsider',password}});
   await expect(first,origin,'/api/official/enroll',400,{method:'POST',source:'https://outside.example',body:{code,username:'outsider',password}});
+  assert.equal((await site.query('SELECT count(*) n FROM staff_accounts'))[0].n,0);
+  assert.equal((await site.query('SELECT count(*) n FROM official_installation'))[0].n,0);
   const raced=await Promise.all(['owner','other'].map(username=>send(first,origin,'/api/official/enroll',{method:'POST',body:{code,username,password}})));
   assert.deepEqual(raced.map(item=>item.status).sort(),[200,409]);
   const admin=(await site.query('SELECT username FROM staff_accounts'))[0].username;

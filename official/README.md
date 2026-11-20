@@ -8,7 +8,9 @@ Cloudflare manages your subscription. LevelTwo360 supports Workers Free and Work
 
 ## Deploy from the official button
 
-The release owner generates the button using `node official/deploy-link.mjs https://github.com/OWNER/APPROVED-TEMPLATE`. The approved template repository’s default branch must contain this candidate. Hosted consent, build-token provisioning, secret handling and deployment are pending isolated acceptance. This repository’s default branch is not the candidate.
+From the reviewed release checkout, the release owner runs `node official/deploy-link.mjs https://github.com/OWNER/APPROVED-TEMPLATE`. The generator verifies anonymously that the public default branch contains the exact committed file tree under review before printing a button. Keep that branch on the approved release while issuing invitations. A branch URL displayed the correct form during rehearsal but the hosted seed clone failed before building. The recovery build succeeded after the source was supplied separately. Fresh hosted acceptance needs an approved public repository root.
+
+Enter the permanent Administrator password only on the agency’s deployed LevelTwo360 site. The official button supports configuration values and persistent Worker secrets. Cloudflare documents no single-use password field with guaranteed disposal on deployment success, failure and retry. Hashing in a migration or Worker would leave the original provider-side input outside the application’s control.
 
 1. Open the supplied **Deploy to Cloudflare** link. Sign in to the agency’s Cloudflare account or create it using the agency’s onboarding process. Select the intended account.
 2. Connect GitHub using your named login. Grant the Workers & Pages app access to the deployment repository in the agency’s GitHub organization. An organization owner or app manager may need to authorize it. Verify the repository owner and visibility before continuing. Use a private agency copy when offered.
