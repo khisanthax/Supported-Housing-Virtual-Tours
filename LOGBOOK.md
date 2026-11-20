@@ -228,3 +228,4 @@
 # Deployment strategy review · 20 November 2026
 
 Recorded the official Deploy button as the current distribution priority and deferred the custom OAuth path. The new deployment roadmap covers provider signup, repository ownership, secure bootstrap, agency-operated recovery and approval of updates. Six local distribution tests passed on base be04506. These tests cover existing components. The hosted button, first-time account screens and Free-account provisioning still require isolated acceptance.
+Option A clarification, 20 November 2026. Both Workers Free and Workers Paid are supported targets. Eligibility depends on required services and permissions. No plan evidence or billing lookup is required. Wrangler dry-run bundled 97 assets and reported all four expected bindings. All six distribution tests passed. Hosted acceptance on each plan awaits approval.
