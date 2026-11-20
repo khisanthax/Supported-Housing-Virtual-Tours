@@ -1,0 +1,54 @@
+import {recoverPoseOverlaps} from './pose-overlap.js';
+import {dot} from './math.js';
+import {cameraRay,refineRotations,connectedFrames,bearingResidual,pixelResidual,interpolateScale} from './alignment.js';
+export async function alignFrames(frames,progress=()=>{}){
+ await import('./vendor/opencv.js');const cv=globalThis.cv;
+ if(!cv?.Mat)await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('OpenCV initialization timed out. Sources kept.')),30000);cv.onRuntimeInitialized=()=>{clearTimeout(timer);resolve()}});
+ const features=[];let edges=[];const diagnosticPairs=[];let orb,matcher;
+ try{
+  orb=new cv.AKAZE();orb.setThreshold(.001);matcher=new cv.BFMatcher(cv.NORM_HAMMING,false);
+  for(let i=0;i<frames.length;i++){
+   const bitmap=await createImageBitmap(frames[i].blob),scale=Math.min(1,800/Math.max(bitmap.width,bitmap.height)),w=Math.round(bitmap.width*scale),h=Math.round(bitmap.height*scale),canvas=new OffscreenCanvas(w,h),ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0,w,h);bitmap.close();
+   const pixels=ctx.getImageData(0,0,w,h),src=cv.matFromImageData(pixels),gray=new cv.Mat(),mask=new cv.Mat(),kp=new cv.KeyPointVector(),desc=new cv.Mat();
+   try{cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.equalizeHist(gray,gray);orb.detectAndCompute(gray,mask,kp,desc);const points=[],light=[];for(let j=0;j<kp.size();j++){const p=kp.get(j).pt;points.push([2*p.x/(w-1)-1,1-2*p.y/(h-1)]);const at=(Math.round(p.y)*w+Math.round(p.x))*4;light.push((pixels.data[at]+pixels.data[at+1]+pixels.data[at+2])/3)}features.push({points,light,desc,w,h})}catch(e){desc.delete();throw e}finally{src.delete();gray.delete();mask.delete();kp.delete();canvas.width=canvas.height=1}
+   progress({stage:'features',done:i+1,total:frames.length});
+  }
+  for(let i=0;i<frames.length;i++)for(let j=i+1;j<frames.length;j++){
+   if(dot(frames[i].pose.f,frames[j].pose.f)<.05)continue; // Bounded nearby pairs; reject invalid legacy pose conventions.
+
+   const a=features[i],b=features[j];if(a.desc.rows<12||b.desc.rows<12)continue;
+   progress({stage:'matching',done:i+1,total:frames.length});const knn=new cv.DMatchVectorVector(),candidate=[];
+   try{matcher.knnMatch(a.desc,b.desc,knn,2);for(let k=0;k<knn.size();k++){const row=knn.get(k);try{if(row.size()<2)continue;const m=row.get(0),n=row.get(1);if(m.distance<.72*n.distance)candidate.push(m)}finally{row.delete()}}}finally{knn.delete()}
+   if(candidate.length<12)continue;
+   let from,to,H,mask;try{
+    from=cv.matFromArray(candidate.length,1,cv.CV_32FC2,candidate.flatMap(m=>[...a.points[m.queryIdx]].map((v,k)=>(k===0?v+1:1-v)*(k===0?a.w:a.h)/2)));
+    to=cv.matFromArray(candidate.length,1,cv.CV_32FC2,candidate.flatMap(m=>[...b.points[m.trainIdx]].map((v,k)=>(k===0?v+1:1-v)*(k===0?b.w:b.h)/2)));
+    mask=new cv.Mat();H=cv.findHomography(from,to,cv.RANSAC,2.5,mask);if(H.empty())continue;
+    const inliers=candidate.filter((m,k)=>mask.data[k]);
+    if(inliers.length<12||inliers.length/candidate.length<=.35)continue;
+    const matches=inliers.slice(0,100).map(m=>({a:a.points[m.queryIdx],b:b.points[m.trainIdx],gain:Math.log(Math.max(15,a.light[m.queryIdx])/Math.max(15,b.light[m.trainIdx]))}));
+    const priorErrors=matches.map(m=>{const ray=(p,f)=>{const v=cameraRay(p,f);return v.map((_,k)=>f.pose.r[k]*v[0]+f.pose.u[k]*v[1]+f.pose.f[k]*v[2])};return Math.acos(Math.max(-1,Math.min(1,dot(ray(m.a,frames[i]),ray(m.b,frames[j])))))}).sort((a,b)=>a-b);
+    diagnosticPairs.push({i,j,prior:priorErrors[Math.floor(priorErrors.length/2)]*180/Math.PI});
+    if(priorErrors[Math.floor(priorErrors.length/2)]<.18)edges.push({i,j,matches});
+   }finally{from?.delete();to?.delete();H?.delete();mask?.delete()}
+  }
+  const guidedPairs=await recoverPoseOverlaps(cv,frames,edges,progress);
+  const retained=frames.map((f,i)=>i).filter(i=>edges.some(e=>e.i===i||e.j===i)),excluded=frames.filter((f,i)=>!retained.includes(i)).map(f=>f.id);
+  if(retained.length!==frames.length){const error=Error('Could not stitch: only '+retained.length+' of '+frames.length+' photos have verified matches. Your original photos are saved. Check source photos '+frames.flatMap((f,i)=>excluded.includes(f.id)?[f.sourceNumber??i+1]:[]).join(', ')+'. The matcher could not verify their overlap. Every source photo must participate; no photos were dropped.');error.diagnostics={guidedPairs,keypoints:features.map(f=>f.points.length),verifiedPairs:edges.length,missingMatchedSourceIds:excluded,coverage:"not rendered: incomplete match graph",ransacPairs:diagnosticPairs};throw error;}
+  if(!connectedFrames(frames.length,edges))throw Error('Feature graph has disconnected components: '+edges.map(e=>frames[e.i].id+'-'+frames[e.j].id).join(' ')+' Sources retained; no guessed alignment.');
+  // Deterministic held-out feature correspondences; not independent scene ground truth.
+  const training=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5>1)})),heldout=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5===1)}));
+  let best;const profile=[];const consider=(scale,k1)=>{try{const r=refineRotations(frames,training,{scale,k1}),validation=bearingResidual(frames,heldout,r.poses,{scale,k1});profile.push({scale,error:validation.degrees});if(!best||validation.degrees<best.validation.degrees)best={...r,scale,k1,validation};}catch(error){if(!/camera\/lens model|folds the image/.test(error.message))throw error;}};
+  for(const scale of [.45,.55,.65,.75,.85,.95,1,1.1,1.2]){consider(scale,0);progress({stage:'alignment',scale,error:best?.after})}
+  if(!best)throw Error('No valid camera model; original photos kept.');
+  const interpolated=interpolateScale(profile);if(interpolated)consider(interpolated,0);
+  // No automatic radial coefficient: full optical calibration is not established.
+  const testEdges=edges.map(e=>({...e,matches:e.matches.filter((_,i)=>i%5===0)}));best.heldout=bearingResidual(frames,testEdges,best.poses,{scale:best.scale,k1:best.k1});best.pixels=pixelResidual(frames,testEdges,best.poses,features,{scale:best.scale,k1:best.k1});
+  if(best.pixels.invalid||best.pixels.rms>3||best.pixels.p90>6){const error=Error('The photos still do not line up reliably. No panorama was created. Originals are kept; retry or retake overlapping views while rotating around the camera lens.');error.diagnostics={guidedPairs,heldoutPixels:best.pixels,thresholds:{rms:3,p90:6},originalFrames:frames.length,usedFrames:frames.length};throw error;}
+  if(best.heldout.degrees>2.5||best.heldout.degrees>best.after*3+.5)throw Error('The alignment could not be verified using the other image details. No panorama created; original photos kept.');
+  const gains=frames.map(()=>0);for(let n=0;n<50;n++){const sums=frames.map(()=>0),counts=frames.map(()=>0);for(const e of edges){const values=e.matches.map(m=>m.gain).sort((a,b)=>a-b),g=values[Math.floor(values.length/2)];sums[e.j]+=gains[e.i]+g;sums[e.i]+=gains[e.j]-g;counts[e.i]++;counts[e.j]++}for(let i=1;i<frames.length;i++)if(counts[i])gains[i]=Math.max(-.5,Math.min(.5,sums[i]/counts[i]))}
+  const exposureBefore=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+m.gain*m.gain,0),0)/edges.reduce((n,e)=>n+e.matches.length,0)),exposureAfter=Math.sqrt(edges.reduce((sum,e)=>sum+e.matches.reduce((n,m)=>n+(m.gain+gains[e.i]-gains[e.j])**2,0),0)/edges.reduce((n,e)=>n+e.matches.length,0));
+  if(best.after>2.5)throw Error('Residual alignment '+best.after.toFixed(3)+' exceeds the experimental quality limit; likely parallax, wrong lens or bad matches. Originals kept.');
+  return{frames:frames.map((f,i)=>({...f,pose:best.poses[i],hfov:2*Math.atan(Math.tan(f.hfov*Math.PI/360)*best.scale)*180/Math.PI,radial:best.k1,gain:Math.exp(gains[i])})),report:{guidedPairs,exposureBeforeLogRMS:exposureBefore,exposureAfterLogRMS:exposureAfter,excludedUnmatchedFrames:excluded,engine:'OpenCV AKAZE/RANSAC + bounded rotation graph',edges:edges.length,pairs:best.pairs,beforeDegrees:best.before,afterDegrees:best.after,heldoutDegrees:best.heldout.degrees,heldoutPairs:best.heldout.pairs,tuningDegrees:best.validation.degrees,heldoutPixels:best.pixels,radialFitting:"disabled: no independent optical calibration",originalFrames:frames.length,usedFrames:frames.length,focalScale:best.scale,radialK1:best.k1,wasmHeapBytes:cv.HEAPU8?.buffer.byteLength??null}};
+ }finally{for(const f of features)f.desc.delete();orb?.delete();matcher?.delete()}
+}

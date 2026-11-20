@@ -13,7 +13,15 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node capture/camera-test.mjs
+      - run: node capture/test-backup-browser.mjs
       - run: node capture/recovery-browser-test.mjs
+      - run: node capture/roll-browser-test.mjs
+      - run: node capture/worker-policy-browser-test.mjs
+      - run: node capture/source-zip-browser-test.mjs
+      - run: node capture/pose-overlap-test.mjs
+      - run: node capture/quality-test.mjs
+      - run: node capture/calibration-browser-test.mjs
+      - run: node capture/fov-test.mjs
       - run: node capture/guidance-browser-test.mjs
       - run: node capture/browser-test.mjs
   test:

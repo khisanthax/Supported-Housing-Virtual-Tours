@@ -1,3 +1,4 @@
+import {captureWorkerCSP} from '../capture/security-headers.mjs';
 // Existing Cloudflare application runs against isolated in-memory D1/KV adapters.
 // No Cloudflare credentials, resources, or network deployment are used.
 import { DatabaseSync } from "node:sqlite";
@@ -80,7 +81,13 @@ const env = {
     async fetch(request) {
       try {
         const path = new URL(request.url).pathname;
-        let data = await readFile(new URL(captureTest&&path.startsWith('/staff/editor/capture/')?'../capture/'+path.split('/').pop():'../cloudflare/generated'+path,import.meta.url));
+        let data;
+        if(captureTest&&path.startsWith('/staff/editor/capture/')){
+          const module=path.slice('/staff/editor/capture/'.length),allowed=new Set(['ui.js','math.js','guidance.js','calibration.js','store.js','projection.js','stitch-quality.js','alignment.js','feature-align.js','pose-overlap.js','stitch-worker.js','synthetic.js','indoor-fixture.js','style.css']);
+          if(module==='vendor/opencv.js')data=Buffer.from('// UMD receiver adapted for module workers.\n'+(await readFile(new URL('../node_modules/@techstark/opencv-js/dist/opencv.js',import.meta.url),'utf8')).replace('}(this, function','}(globalThis, function'));
+          else if(allowed.has(module))data=await readFile(new URL('../capture/'+module,import.meta.url));
+          else return new Response('Not found',{status:404});
+        }else data=await readFile(new URL('../cloudflare/generated'+path,import.meta.url));
         if(captureTest&&path==='/staff/editor/editor-runtime.js')data=Buffer.from("import {captureRoom} from './capture/ui.js';\n"+data.toString().replace('  applyAccess,','  applyAccess, captureRoom:options=>captureRoom({...options,syntheticBench:true}),'));
         if(captureTest&&path==='/staff/editor/index.html')data=Buffer.from(data.toString().replace('<head>','<head><link rel="stylesheet" href="capture/style.css">'));
         const type = path.endsWith(".js")
@@ -133,7 +140,10 @@ const server = createServer(async (req, res) => {
       }),
       env,
     );
-    res.writeHead(response.status, Object.fromEntries(response.headers));
+    const responseHeaders=new Headers(response.headers);
+    // Only the isolated loopback stitch worker permits binding code generation. Production/document CSP is unchanged.
+    if(captureTest&&req.url.split('?')[0]==='/staff/editor/capture/stitch-worker.js')responseHeaders.set('Content-Security-Policy',captureWorkerCSP);
+    res.writeHead(response.status, Object.fromEntries(responseHeaders));
     res.end(Buffer.from(await response.arrayBuffer()));
     if (req.method === "POST" && req.url === "/api/staff/photos") uploads++;
   } catch {
@@ -189,10 +199,10 @@ try {
     const before=uploads;
     await page.goto(origin+'/staff/editor/?apartment='+row.apartment);
     await page.locator('#guide-capture').click();await page.locator('#capture-synthetic').click();
-    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('38 of'));
+    await page.waitForFunction(()=>document.querySelector('#capture-count')?.textContent.startsWith('37 of 37'));
     await page.locator('#capture-settings').evaluate(d=>d.open=true);await page.locator('#capture-resolution').selectOption('1024');await page.locator('#capture-name').fill('Synthetic Cloud capture');
-    await page.locator('#capture-stitch').click();await page.waitForFunction(()=>document.querySelector('#capture-message')?.textContent.startsWith('Preview:'),{},{timeout:120000});
-    assert.equal(uploads,before,'No upload before approval');
+    await page.locator('#capture-stitch').click();await page.waitForFunction(()=>document.querySelector('#capture-stitch')?.disabled===false,{},{timeout:180000});assert.match(await page.locator('#capture-stitch-status').textContent(),/^Preview: candidate/,'Capture must produce a qualified candidate: '+JSON.stringify(errors));
+    assert.equal(uploads,before,'No upload before approval');assert.equal(await page.locator('#capture-approved').isEnabled(),true,'Only a qualified feature candidate can be approved');
     await page.locator('#capture-approved').check();await page.locator('#capture-use').click();
     await page.waitForFunction(()=>document.querySelector('#guide-status').textContent.includes('Captured panorama saved'));
     assert.equal(uploads,before+1,'Only the accepted completed JPEG is uploaded');
