@@ -1,5 +1,13 @@
 # Development log
 
+## Deploy-button credential and fresh-template verification · 20 November 2026
+
+Reviewed Cloudflare's [Deploy-button fields](https://developers.cloudflare.com/workers/platform/deploy-buttons/) and [Worker secret bindings](https://developers.cloudflare.com/workers/configuration/secrets/). Neither provides a documented one-shot input for the first Administrator password. A failed clone may prevent all application cleanup. Password fields were therefore kept out of the template, and enrollment continues on the agency Worker.
+
+The release link generator now checks the public default branch anonymously against the reviewed Git file tree and refuses branch URLs, inaccessible sources and mismatches. A read-only check rejected the current upstream default branch as expected. This prevents issuing a known-broken invitation. A successful hosted clone from an approved public template root remains outstanding.
+
+Clean single-branch local clone at `66a8942`: locked dependency install, 97 unit tests and the official Worker acceptance run passed. Invalid enrollment left zero Administrator and installation records. First enrollment created one account under concurrent submission, migration retry preserved it, and the revised Worker reused the existing data. These results cover the existing owner-verification flow. No deployment-time permanent credential was submitted or tested.
+
 ## Official Deploy button hosted rehearsal · 20 November 2026
 
 GitHub consent limited to a disposable repository allowed the official wizard to create a separate private destination repository. Cloudflare wrote the selected Worker name and new D1 and KV bindings to its configuration. Preview builds were disabled. The wizard read the Option A branch configuration, but the hosted seed clone of the branch URL failed with Git exit 128. The resulting repository contained only README.md and wrangler.jsonc. The branch URL is unsuitable for an agency invitation.
