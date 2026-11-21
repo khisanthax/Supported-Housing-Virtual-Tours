@@ -269,6 +269,7 @@ try {
       await page.getByRole('link',{name:'Sign in to LevelTwo360'}).click();
       await page.getByRole('button',{name:'Sign in',exact:true}).waitFor();
       assert.deepEqual(failures,[]);
+      await page.unrouteAll({behavior:'wait'});
       console.log('Option A Chromium acceptance passed at a 390 px viewport.');
     }finally{await browser.close();}
   }
