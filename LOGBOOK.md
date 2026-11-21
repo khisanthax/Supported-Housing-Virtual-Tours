@@ -287,3 +287,9 @@ The owner withdrew the emergency-maintenance provisions before publication. Remo
 The replacement one-commit template is `774273166e49846c6a2e06dd1b00a35a824a93a4`, tree `f7d7c0779ec377ec4e4a1a1e11a2007ed53d0886`. The file comparison shows only the three licensing and distribution documents changed. The generated notice matches all four source documents, and the Worker acceptance test verified the revised text at `/legal`. A fresh clone passed the locked dependency install, Wrangler dry run, local Worker acceptance and 390 px Chromium handoff. The 97 maintainer regression tests passed.
 
 Draft PR #52 records the replacement candidate. Final owner approval is required before publication or deployment. Fresh hosted acceptance remains pending.
+
+## Public template publication
+
+The owner approved publication and the isolated rehearsal. Published the exact approved commit `774273166e49846c6a2e06dd1b00a35a824a93a4` as `main` in [khisanthax/leveltwo360-cloudflare-template](https://github.com/khisanthax/leveltwo360-cloudflare-template). The link generator verified the public default-branch tree anonymously and returned the official repository-root deployment link.
+
+The fresh hosted rehearsal awaits access to a signed-in Cloudflare dashboard tab. Browser access was unavailable, and automatic review blocked access to a desktop window displaying unrelated content. No fresh deployment was started.
