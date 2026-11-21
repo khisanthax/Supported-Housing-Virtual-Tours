@@ -1,5 +1,7 @@
 # Cloudflare installation and upgrades
 
+The [deployment roadmap](DEPLOYMENT-ROADMAP.md) prioritizes evaluation of Cloudflare’s official Deploy button. The custom OAuth installer is deferred.
+
 Version 0.2.0, schema 4. This is the Cloudflare edition. Local Only and Linux editions are designs, not products. Repository distribution/licensing terms still require the owner's decision; this change does not publish a release or select a license.
 
 ## Independent installation

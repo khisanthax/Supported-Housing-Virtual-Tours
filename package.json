@@ -2,12 +2,23 @@
   "name": "supported-housing-walkthrough",
   "private": true,
   "type": "module",
+  "cloudflare": {
+    "bindings": {
+      "LT360_INSTALL_KEY": {
+        "description": "Create a unique temporary setup key with your password manager (at least 24 random characters). Save it for the next step. After the build succeeds, open **Visit** or your **workers.dev** website and enter this key to create your Administrator. The setup window lasts 60 minutes from database initialization."
+      }
+    }
+  },
   "scripts": {
     "start": "node scripts/serve.mjs",
     "start:sharing": "node scripts/guest-server.mjs",
     "test": "node --test tests/*.test.mjs",
     "setup": "node cloudflare/install.mjs",
     "prepare": "node cloudflare/prepare.mjs",
+    "build": "npm run prepare",
+    "deploy": "node official/deploy.mjs",
+    "test:official": "npm run build && node official/acceptance.mjs",
+    "agency:maintenance": "node official/maintenance.mjs",
     "build:local": "node local/build.mjs",
     "start:local": "node local/serve.mjs",
     "test:local:browser": "node local/browser-test.mjs",
@@ -16,6 +27,7 @@
   "devDependencies": {
     "@inquirer/prompts": "7.8.4",
     "fake-indexeddb": "6.2.8",
+    "miniflare": "5.20261103.0-beta",
     "playwright": "1.64.1",
     "wrangler": "4.157.0"
   },

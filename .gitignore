@@ -15,6 +15,7 @@ cloudflare/.wrangler/
 *.db
 *.db-*
 *.shtour
+*.lt360backup
 *.dpapi*
 *.tar.gz
 .openai/
