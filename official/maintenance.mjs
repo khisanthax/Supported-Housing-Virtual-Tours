@@ -20,7 +20,7 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const name = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const digest = /^[a-f0-9]{64}$/;
 const quote = value => '"' + value.replaceAll('"','""') + '"';
-const skip = new Set(['official_installation','official_restore','official_setup_window','app_migrations','sessions','staff_sessions','firebase_staff_sessions','attempts','diagnostic_operations','diagnostic_daily']);
+const skip = new Set(['official_installation','official_restore','official_setup_window','app_migrations','sessions','staff_sessions','firebase_staff_sessions','attempts','diagnostic_operations','diagnostic_daily','support_grants','support_rate']);
 const parentOrder = ['staff_accounts','firebase_staff_accounts','photos','shares'];
 const initialRows = {
   uploads_gallery: [{id:1,apartments:'[]',revision:0,changed_by:'migration',changed_at:0}],

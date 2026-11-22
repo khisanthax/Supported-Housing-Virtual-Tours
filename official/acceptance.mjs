@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,readFile,readdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve,sep} from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFile,execFileSync} from 'node:child_process';
 import {generateKeyPairSync,randomBytes} from 'node:crypto';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {openInstallation,backUp,restore} from './maintenance.mjs';
+import {createHelpHub} from '../help-hub/server.mjs';
+import {once} from 'node:events';
+import {promisify} from 'node:util';
 
 const root=resolve(import.meta.dirname,'..');
 const path=await mkdtemp(join(tmpdir(),'lt360-official-'));
@@ -29,16 +32,16 @@ const wrangler=(...args)=>execFileSync(process.execPath,['node_modules/wrangler/
 const assetApi=async request=>{
   const asset=resolve(assets,'.'+new URL(request.url).pathname);
   if (!asset.startsWith(assets+sep))return new Response(null,{status:404});
-  try{return new Response(await readFile(asset),{headers:{'Content-Type':asset.endsWith('.js')?'text/javascript':'text/html'}});}
+  try{return new Response(await readFile(asset),{headers:{'Content-Type':asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':'text/html'}});}
   catch{return new Response(null,{status:404});}
 };
-const runtime=(releaseCode,bindings)=>{
+const runtime=(releaseCode,bindings,outboundService)=>{
   return new Miniflare(convertV4MiniflareOptions({workers:[{
     name:'official','modules':true,script:releaseCode,compatibilityDate:cfg.compatibility_date,
     compatibilityFlags:cfg.compatibility_flags,bindings,
     d1Databases:{DB:dbName},kvNamespaces:{PHOTOS:kv},
     durableObjects:{STAFF_LOGIN:{className:'StaffLogin',useSQLite:true}},
-    serviceBindings:{ASSETS:assetApi}
+    serviceBindings:{ASSETS:assetApi},outboundService
   }]}));
 };
 const prepare=async db=>{
@@ -71,6 +74,7 @@ const toSite=async (mf,siteOrigin)=>{
   };
 };
 const resources=[];
+let hub;
 try {
   // A raw checkout must stop before any remote command if binding substitution
   // did not happen. Verify the official link targets the approved template URL.
@@ -95,7 +99,25 @@ try {
   await mkdir(bundle);
   wrangler('deploy','--dry-run','--config','wrangler.jsonc','--outdir',bundle);
   const source=await readFile(join(bundle,'worker.js'),'utf8');
-  const first=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(first);
+  const hubOrigin='https://help.synthetic.invalid';
+  const hubTokens=[0,1].map(()=>randomBytes(32).toString('base64url'));
+  let hubUrl;
+  let hubOutboundError;
+  const hubOutbound=async request=>{
+    assert.equal(new URL(request.url).origin,hubOrigin);
+    try {
+      const result=await fetch(hubUrl+'/agency/tickets',{method:request.method,headers:{
+        Authorization:request.headers.get('authorization'),'Content-Type':'application/json'
+      },body:request.method==='POST'?await request.text():undefined});
+      if(!result.ok)hubOutboundError='Hub returned '+result.status+' '+await result.clone().text();
+      return result;
+    } catch(error) {
+      hubOutboundError=error.message;
+      return new Response(null,{status:503});
+    }
+  };
+  const supportVars=index=>({...vars,SUPPORT_ENABLED:'1',SUPPORT_HUB_ORIGIN:hubOrigin,SUPPORT_HUB_TOKEN:hubTokens[index]});
+  const first=runtime(source,{...supportVars(0),LT360_INSTALL_KEY:code},hubOutbound);resources.push(first);
   const second=runtime(source,{...vars,LT360_SETUP_CODE:otherCode});resources.push(second);
   const disabled=runtime(source,vars);resources.push(disabled);
   const expired=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(expired);
@@ -141,6 +163,130 @@ try {
   await expect(first,origin,'/api/staff/accounts',201,{method:'POST',cookie,body:{username:'synthetic-editor',role:'editor',password:'Synthetic editor test password'}});
   const editor=await expect(first,origin,'/api/staff/sign-in',200,{method:'POST',body:{username:'synthetic-editor',password:'Synthetic editor test password'}});
   await expect(first,origin,'/api/staff/accounts',403,{cookie:editor.headers.get('Set-Cookie').split(';')[0]});
+  await expect(first,origin,'/api/support/admin',403,{cookie:editor.headers.get('Set-Cookie').split(';')[0]});
+  const supportBOrigin='https://synthetic-agency-b.test-account.workers.dev';
+  const supportB=runtime(source,{...supportVars(1),LT360_INSTALL_KEY:code},hubOutbound);resources.push(supportB);
+  const supportBDb=await supportB.getD1Database('DB');
+  await prepare(supportBDb);
+  await expect(supportB,supportBOrigin,'/api/official/enroll',200,{method:'POST',body:{code,username:admin,password}});
+  const supportBCookie=await login(supportB,supportBOrigin);
+  const agencyIds=(await Promise.all([site.db,supportBDb].map(db=>db.prepare('SELECT installation_id FROM official_installation').first()))).map(row=>row.installation_id);
+  assert.notEqual(agencyIds[0],agencyIds[1]);
+  const hubDb=join(path,'help-hub.sqlite');
+  const ownerToken=randomBytes(32).toString('base64url');
+  hub=createHelpHub({database:hubDb,ownerToken,key:randomBytes(32).toString('base64url'),
+    agencies:[origin,supportBOrigin].map((origin,index)=>({id:agencyIds[index],origin,label:index?'Agency B':'Agency A',token:hubTokens[index]})),
+    fetchAgency:(url,init)=>(new URL(url).origin===origin?first:supportB).dispatchFetch(url,init)
+  });
+  hub.listen(0,'127.0.0.1');
+  await once(hub,'listening');
+  hubUrl='http://127.0.0.1:'+hub.address().port;
+  const rpc=async(method,params={},token=ownerToken)=>{
+    const reply=await fetch(hubUrl+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+    if(!reply.ok)return {status:reply.status};
+    return (await reply.json()).result;
+  };
+  const call=async(name,arguments_,blocked=false)=>{
+    const reply=await rpc('tools/call',{name,arguments:arguments_});
+    assert.equal(Boolean(reply.isError),blocked,name+' '+(reply.isError?reply.content[0].text:''));
+    return reply.isError?reply.content[0].text:JSON.parse(reply.content[0].text);
+  };
+  const supportPost=(mf,host,route,session,body,status=200)=>expect(mf,host,'/api/support/'+route,status,{method:'POST',cookie:session,body});
+  const createSupport=async(mf,host,session,permissions=['diagnostics'],apartments=[],issue)=>(
+    await supportPost(mf,host,'admin',session,{hours:2,permissions,apartments,issue},201)).json();
+  const a=await createSupport(first,origin,cookie,['diagnostics','apartments','reset-diagnostics'],[apartment.id],'Synthetic diagnostic repair');
+  const b=await createSupport(supportB,supportBOrigin,supportBCookie,['diagnostics'],[],'Synthetic diagnostics review');
+  assert.equal(a.ticket,'LT-001',hubOutboundError??'Agency did not receive a Hub ticket.');
+  assert.equal(b.ticket,'LT-002');
+  assert.match(a.key,/^[A-Za-z0-9_-]{43}$/);
+  assert.equal(a.grant.expires,null);
+  assert.deepEqual(await rpc('tools/list',{},hubTokens[0]),{status:401});
+  assert.equal((await rpc('initialize',{protocolVersion:'2025-11-25'})).serverInfo.name,'leveltwo360-help-hub');
+  assert.ok((await rpc('tools/list')).tools.some(tool=>tool.name==='activate_support'));
+  assert.deepEqual((await call('list_requests',{})).map(entry=>entry.agency),['Agency A','Agency B']);
+  assert.equal((await call('get_request',{ticket:a.ticket})).status,'pending');
+  assert.match(await call('activate_support',{ticket:a.ticket},true),/owner approval/);
+  assert.equal((await site.query('SELECT activated FROM support_grants WHERE id=?',[a.grant.id]))[0].activated,null);
+  execFileSync(process.execPath,['help-hub/server.mjs','approve',a.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+  assert.match(await call('activate_support',{ticket:b.ticket},true),/owner approval/);
+  const activations=await Promise.all([0,1].map(()=>rpc('tools/call',{name:'activate_support',arguments:{ticket:a.ticket}})));
+  assert.equal(activations.filter(reply=>!reply.isError).length,1);
+  const active=await call('get_support_session',{ticket:a.ticket});
+  assert.equal(active.expires-active.activated,7200000);
+  await supportPost(first,origin,'activate','',{key:a.key},403);
+  await supportPost(supportB,supportBOrigin,'activate','',{key:a.key},403);
+  assert.equal((await call('inspect_apartment',{ticket:a.ticket,apartment:apartment.id})).id,apartment.id);
+  await call('inspect_apartment',{ticket:a.ticket,apartment:'ab'.repeat(16)},true);
+  await call('view_settings',{ticket:a.ticket},true);
+  await site.query("UPDATE diagnostic_settings SET level='off' WHERE id=1");
+  assert.equal((await call('view_diagnostics',{ticket:a.ticket})).level,'off');
+  assert.deepEqual(await call('reset_diagnostics',{ticket:a.ticket}),{ok:true});
+  assert.equal((await call('view_diagnostics',{ticket:a.ticket})).level,'normal');
+  const pending=await call('request_more_time',{ticket:a.ticket});
+  const more=await (await supportPost(first,origin,'admin/'+a.grant.id+'/extension',cookie,{approve:true,hours:24,requested:pending.requested})).json();
+  assert.equal(more.expires-active.expires,86400000);
+  assert.deepEqual(more.permissions,active.permissions);
+  assert.deepEqual(more.apartments,active.apartments);
+  await call('send_note',{ticket:a.ticket,note:'Synthetic repair completed.'});
+  assert.deepEqual((await (await expect(supportB,supportBOrigin,'/api/support/admin/tickets',200,{cookie:supportBCookie})).json()).tickets.map(item=>item.ticket),[b.ticket]);
+  assert.ok((await (await expect(first,origin,'/api/support/admin/tickets',200,{cookie})).json()).tickets[0].history.some(entry=>entry.note==='Synthetic repair completed.'));
+  await supportPost(first,origin,'admin/'+a.grant.id+'/revoke',cookie,{});
+  await call('view_diagnostics',{ticket:a.ticket},true);
+  assert.equal((await call('get_request',{ticket:a.ticket})).status,'closed');
+  execFileSync(process.execPath,['help-hub/server.mjs','approve',b.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+  await call('activate_support',{ticket:b.ticket});
+  await call('reset_diagnostics',{ticket:b.ticket},true);
+  const waiting=await call('request_more_time',{ticket:b.ticket});
+  const denied=await (await supportPost(supportB,supportBOrigin,'admin/'+b.grant.id+'/extension',supportBCookie,{approve:false,requested:waiting.requested})).json();
+  assert.equal(denied.expires,waiting.expires);
+  const renewed=await call('request_more_time',{ticket:b.ticket});
+  await supportBDb.prepare('UPDATE support_grants SET expires=0 WHERE id=?').bind(b.grant.id).run();
+  await supportPost(supportB,supportBOrigin,'admin/'+b.grant.id+'/extension',supportBCookie,{approve:true,hours:2,requested:renewed.requested},409);
+  await call('get_support_session',{ticket:b.ticket},true);
+  const localGrant=await createSupport(first,origin,cookie);
+  const fallback=await Promise.all([0,1].map(()=>send(first,origin,'/api/support/activate',{method:'POST',body:{key:localGrant.key}})));
+  assert.deepEqual(fallback.map(reply=>reply.status).sort(),[200,403]);
+  const fallbackCookie=fallback.find(reply=>reply.ok).headers.get('set-cookie').split(';')[0];
+  await expect(first,origin,'/api/staff/dashboard',401,{cookie:fallbackCookie});
+  await expect(supportB,supportBOrigin,'/api/support/session',401,{cookie:fallbackCookie});
+  await supportPost(first,origin,'end',fallbackCookie,{});
+  await expect(first,origin,'/api/support/session',401,{cookie:fallbackCookie});
+  const unused=await createSupport(first,origin,cookie);
+  await site.query('UPDATE support_grants SET redeem_by=0 WHERE id=?',[unused.grant.id]);
+  await supportPost(first,origin,'activate','',{key:unused.key},403);
+  assert.ok(!(await readFile(hubDb)).includes(a.key));
+  const records=JSON.stringify([await site.query('SELECT * FROM support_grants'),await site.query('SELECT * FROM support_audit')]);
+  assert.ok(!records.includes(a.key)&&!records.includes(localGrant.key)&&!records.includes(fallbackCookie.split('=')[1]));
+  for(const name of ['diagnostics_reset','extension_approved','revoked','ended'])assert.ok(records.includes(name));
+  if(process.argv.includes('--codex')){
+    const cliGrant=await createSupport(first,origin,cookie,['diagnostics','reset-diagnostics'],[],'Synthetic CLI rehearsal');
+    const runCodex=async(prompt,expected)=>{
+      const {stdout}=await promisify(execFile)('codex',['exec','--ephemeral','--ignore-user-config','--sandbox','read-only','--json',
+        '-c','shell_environment_policy.inherit="none"',
+        '-c','mcp_servers.leveltwo360.url="'+hubUrl+'/mcp"',
+        '-c','mcp_servers.leveltwo360.bearer_token_env_var="LT360_HUB_TEST_TOKEN"',
+        '-c','mcp_servers.leveltwo360.required=true',prompt],
+      {cwd:root,env:{...process.env,LT360_HUB_TEST_TOKEN:ownerToken},timeout:120000,windowsHide:true});
+      const actual=stdout.split(/\r?\n/).filter(line=>line.startsWith('{')).map(line=>JSON.parse(line))
+        .filter(event=>event.type==='item.completed'&&event.item.type==='mcp_tool_call'&&event.item.server==='leveltwo360')
+        .map(event=>event.item.tool);
+      assert.deepEqual(actual,expected);
+    };
+    await runCodex('Check LevelTwo360 help requests. Call only the list_requests MCP tool and report the tickets.', ['list_requests']);
+    assert.equal((await call('get_request',{ticket:cliGrant.ticket})).status,'pending');
+    execFileSync(process.execPath,['help-hub/server.mjs','approve',cliGrant.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+    await runCodex('Activate '+cliGrant.ticket+' using leveltwo360 activate_support. Then call view_diagnostics, reset_diagnostics, and end_support on that same ticket in that order, and report results. Use only those four tools.',
+      ['activate_support','view_diagnostics','reset_diagnostics','end_support']);
+    assert.equal((await call('get_request',{ticket:cliGrant.ticket})).status,'closed');
+    console.log('Authenticated Codex CLI discovery, activation, diagnosis, repair and closure passed through the running Help Hub.');
+  }
+  await new Promise(resolve=>hub.close(resolve));
+  hub=null;
+  const offline=await createSupport(first,origin,cookie,['diagnostics'],[],'Synthetic Hub outage');
+  assert.match(offline.hubError,/did not confirm/);
+  await supportPost(first,origin,'activate','',{key:offline.key});
+  console.log('Phase B acceptance passed: authenticated Help Hub HTTP/MCP, two isolated Workers, approval and concurrent redemption, scoped diagnosis and repair, extensions, notes, revocation, expiry, and offline fallback.');
   await expect(first,origin,'/api/staff/apartments/'+apartment.id,200,{method:'PATCH',cookie,body:{action:'publish',expectedVersion:apartment.version}});
   // The fixture KV is immediately coherent. Skip only the production wait.
   await site.query('UPDATE versions SET available=0 WHERE apartment=?',[apartment.id]);
@@ -190,6 +336,8 @@ try {
   }},recovery),/interrupted transfer/);
   await expect(second,restoredOrigin,'/setup',503);
   await restore(target,recovery);await restore(target,recovery);
+  assert.equal((await target.query('SELECT count(*) n FROM support_grants'))[0].n,0);
+  assert.ok((await target.query('SELECT count(*) n FROM support_audit'))[0].n>0);
   assert.deepEqual(await target.query('SELECT * FROM access_history'),savedAudit);
   for(const id of Object.values(photos))assert.deepEqual(await target.readImage(id),await site.readImage(id));
   const newCookie=await login(second,restoredOrigin);
@@ -235,11 +383,11 @@ try {
   await expect(first,origin,'/api/staff/drafts/'+apartment.id,200,{cookie:rolledBackCookie});
   if(process.argv.includes('--browser')){
     const {chromium}=await import('playwright');
-    const runner=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(runner);
+    const runner=runtime(source,{...vars,LT360_INSTALL_KEY:code,SUPPORT_ENABLED:'1'});resources.push(runner);
     await prepare(await runner.getD1Database('DB'));
     const browser=await chromium.launch();
     try{
-      const page=await browser.newPage({viewport:{width:390,height:844}});
+      const page=await browser.newPage({viewport:{width:390,height:844},permissions:['clipboard-read','clipboard-write']});
       const failures=[];
       page.on('pageerror',error=>failures.push(error.message));
       await page.route('**/*',async route=>{
@@ -268,13 +416,41 @@ try {
       assert.deepEqual(await page.evaluate(()=>[localStorage.length,sessionStorage.length]),[0,0]);
       await page.getByRole('link',{name:'Sign in to LevelTwo360'}).click();
       await page.getByRole('button',{name:'Sign in',exact:true}).waitFor();
+      await page.evaluate(async password=>{
+        const result=await fetch('/api/staff/sign-in',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'browser-owner',password})});
+        if(!result.ok)throw Error('Synthetic browser sign-in failed.');
+      },password);
+      await page.goto(origin+'/staff/support');
+      await page.getByRole('heading',{name:'Request Technical Support'}).waitFor();
+      assert.equal(await page.getByLabel('Duration',{exact:true}).inputValue(),'2');
+      await page.getByRole('button',{name:'Generate support key'}).click();
+      await page.locator('#issued').waitFor();
+      const supportKey=await page.locator('#key').textContent();
+      await page.getByRole('button',{name:'Copy Key'}).click();
+      assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),supportKey);
+      await page.evaluate(()=>navigator.clipboard.writeText(''));
+      const pdfEvent=page.waitForEvent('download');
+      await page.getByRole('button',{name:'Download PDF'}).click();
+      const pdf=await readFile(await (await pdfEvent).path(),'ascii');
+      assert.ok(pdf.startsWith('%PDF-1.4')&&pdf.includes(supportKey)&&pdf.includes('/support')&&pdf.includes('approved secure channel'));
+      await page.getByRole('button',{name:'Hide key'}).click();
+      assert.equal(await page.locator('#key').textContent(),'');
+      await page.goto(origin+'/support');
+      await page.locator('input[name=key]').fill(supportKey);
+      await page.getByRole('button',{name:'Activate Support'}).click();
+      await page.locator('#session').waitFor();
+      assert.match(await page.locator('#remaining').textContent(),/Time remaining/);
+      await page.getByRole('button',{name:'Request More Time'}).click();
+      await page.getByRole('button',{name:'End Support'}).click();
+      await page.locator('#activation').waitFor();
       assert.deepEqual(failures,[]);
       await page.unrouteAll({behavior:'wait'});
-      console.log('Option A Chromium acceptance passed at a 390 px viewport.');
+      console.log('Option A and Phase B Chromium acceptance passed at a 390 px viewport, including clipboard, PDF and support countdown.');
     }finally{await browser.close();}
   }
   console.log('Option A local acceptance passed: Wrangler migrations and retry, real Worker/D1/KV/SQLite Durable Objects, owner-only atomic enrollment, sign-in, private draft/photo upload, verified encrypted recovery, restore retry and isolation, revised Worker with retained data.');
 } finally {
+  if(hub)await new Promise(resolve=>hub.close(resolve));
   await Promise.allSettled(resources.map(resource=>resource.dispose()));
   await rm(path,{recursive:true,force:true});
 }

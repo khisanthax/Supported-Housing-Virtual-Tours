@@ -1,5 +1,6 @@
 import {release} from './release.mjs';
 import {officialRequest} from './official-installation.mjs';
+import {serveSupport,supportEnabled} from './support.mjs';
 import {createDiagnostic,storeDiagnostic,diagnosticQuery,validateClientEvents,newTrace,tracePattern} from './diagnostics.mjs';
 import { uploadsApi } from './uploads-api.mjs';
 import { assertAdditiveUpload } from '../dist/uploads-data.js';
@@ -396,6 +397,28 @@ async function route(request,env,privateStaffOnly,diag=null) {
     if (!candidate || !timingSafeEqual(Buffer.from(candidate),Buffer.from(share.verifier))) wrong();
     return session('kv_guest',share.id,share.revision,Math.min(share.expires,now+8*hour));
   }
+  if (['/support','/staff/support','/support.js','/support.css'].includes(path) || path.startsWith('/api/support/')) {
+    if (!supportEnabled(env)) fail(404,'Support is unavailable.');
+    if (path==='/staff/support' || path.startsWith('/api/support/admin')) {
+      const account=await requireStaff();
+      if (account.role!=='administrator') fail(403,'Administrator access required.');
+      if (method==='GET' && path==='/staff/support') return asset('/official/support-admin.html');
+      return serveSupport(request,env,db,{administrator:account,readJson:json});
+    }
+    if (method==='GET' && ['/support','/support.js','/support.css'].includes(path))
+      return asset('/official/'+(path==='/support'?'support.html':path.slice(1)));
+    return serveSupport(request,env,db,{
+      readJson:json,
+      settings:{edition:release.edition,version:release.version,roleControls:true},
+      async readApartment(id,room){
+        const record=await current(id);
+        if(!record || await one('SELECT 1 FROM apartment_visibility WHERE apartment=? AND state IN (2,3)',id))
+          return output({error:'Apartment is unavailable.'},404);
+        if(!room)return output({id,title:record.title,manifest:JSON.parse(record.manifest)});
+        return tourAsset(record,room,env);
+      }
+    });
+  }
   if (path.startsWith('/api/staff/')) {
     const account=await requireStaff();
     let requestPrincipal=null;
@@ -688,7 +711,7 @@ async function route(request,env,privateStaffOnly,diag=null) {
         (SELECT json_group_array(p.apartment) FROM permissions p WHERE p.share=s.id) AS apartments
         FROM shares s ORDER BY s.expires DESC`,now);
       const invitations=shares.map(s=>({...s,apartments:JSON.parse(s.apartments)}));
-      return output({apartments:requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments,staffRole:account.role,shares:requestPrincipal?visibleInvitations(requestPrincipal,invitations):invitations});
+      return output({apartments:requestPrincipal?visibleApartments(requestPrincipal,apartments):apartments,staffRole:account.role,shares:requestPrincipal?visibleInvitations(requestPrincipal,invitations):invitations,supportEnabled:account.role==='administrator'&&supportEnabled(env)});
     }
     async function selection(apartments) {
       if (!Array.isArray(apartments) || !apartments.length || apartments.length>25 || new Set(apartments).size!==apartments.length ||

@@ -333,3 +333,13 @@ GitHub reported PR #52 mergeable into `main` and all four checks passed on `5c49
 PR #52 can be presented for review. Merging needs the owner's explicit approval after review and green checks on the merge candidate. Review status, main, the public template and Worker deployments were left as found.
 
 The guide bundled in the pinned public template predates the hosted evidence and still describes build-token acceptance as pending. Share the current agency guide and pilot checklist from PR #52 alongside the approved Deploy link. Updating the bundled copy would require an approved template revision.
+
+## Phase B temporary technical support · 22 November 2026
+
+Branched from the verified Option A source at `4d187cb`. Added an agency-only support interface and independent D1 state. Administrator-created keys expire after 24 hours if unused. Redemption is single-use and starts the approved two-, 24-, 48- or 72-hour session. The agency validates expiry, revocation and apartment scope on requests. Extensions add time to an active session without changing permissions. Encrypted application backups retain audit history and omit active and pending support grants.
+
+Added the separate [Help Hub service](help-hub/README.md). Agency Administrators choose whether to forward a short issue description. The Hub exposes read-only ticket discovery over authenticated MCP, with an independent five-minute owner approval for the named activation. The agency remains authoritative for approved operations and immediate revocation. The Hub keeps credentials encrypted and offers one explicitly permissioned repair to restore default diagnostic settings. The Copy Key and PDF handoff remains available during Hub outages. Local Only has no Phase B routes.
+
+Local tests ran against two independently initialized Worker/D1/KV installations carrying fictional Agency A and Agency B data. Verified authenticated ticket discovery, tenant isolation, named approval, concurrent redemption, exact countdown start, out-of-scope denials, diagnostics and the approved repair, extension approval and denial, expiry, notes, immediate revocation, and direct activation during a Hub outage. Verified the restored installation contains audit history and no support grants. Chromium at 390 px verified explicit activation, countdown, clipboard, and PDF download. All 97 repository regression tests passed. The original Option A acceptance suite passed with the new migration.
+
+Hosted Phase B acceptance remains pending separate deployment authorization for the two existing disposable Workers and an approved private Hub endpoint. No hosted Phase B changes were made. PR #52, historical PR #51, and the published template were outside the Phase B branch changes.
