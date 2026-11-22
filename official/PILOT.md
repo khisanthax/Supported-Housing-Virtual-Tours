@@ -25,7 +25,7 @@
 | Status | Evidence |
 | --- | --- |
 | Completed | Workers Free was confirmed in the rehearsal account under **Workers plans → Free → Current plan**. Build `0370fe08` verified the public-root Deploy flow, private destination, all seven migrations, the website handoff and first-Administrator setup. |
-| Completed | Hosted backup, restore and retry on separate bindings preserved staff, one draft version and three JPEGs. Hosted update and rollback retained the draft and sign-in. |
+| Completed | Hosted backup, restore and retry on separate bindings preserved staff, one draft version and three JPEGs. Hosted Git-triggered update and Worker rollback retained the draft and sign-in. |
 | Completed | Hosted scope changes took effect for an existing staff session. Guest publication, viewer and JPEG delivery passed. A guest invitation was denied on the other installation, and revocation blocked both unlock and the prior guest session. |
 | Deferred | The owner will run Workers Paid acceptance separately. |
 | Blocked | No project-level blocker identified for a limited Workers Free pilot. |
