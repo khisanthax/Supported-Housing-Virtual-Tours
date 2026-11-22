@@ -293,3 +293,9 @@ Draft PR #52 records the replacement candidate. Final owner approval is required
 The owner approved publication and the isolated rehearsal. Published the exact approved commit `774273166e49846c6a2e06dd1b00a35a824a93a4` as `main` in [khisanthax/leveltwo360-cloudflare-template](https://github.com/khisanthax/leveltwo360-cloudflare-template). The link generator verified the public default-branch tree anonymously and returned the official repository-root deployment link.
 
 The fresh hosted rehearsal awaits access to a signed-in Cloudflare dashboard tab. Browser access was unavailable, and automatic review blocked access to a desktop window displaying unrelated content. No fresh deployment was started.
+
+## Fresh hosted Option A acceptance
+
+Deployed the approved public repository root at `7742731` through the official button into isolated rehearsal resources. Cloudflare build `0370fe08` cloned the seed repository and pushed the application into the private destination without manual source recovery. The hosted build applied all seven migrations, deployed the Worker, printed its workers.dev address and the first-visit instructions, and reported success.
+
+Opening the printed address redirected to `/setup`. The deployment-time key enrolled a synthetic first Administrator, and sign-in opened the Apartment Gallery. Visiting setup again redirected to staff sign-in. The public legal page served the revised owner license and retained third-party notices. Hosted maintenance and the other subscription plan remain outside this evidence. No production or billing changes.
