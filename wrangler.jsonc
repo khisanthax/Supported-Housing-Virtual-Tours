@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "leveltwo360",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-11-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "observability": { "enabled": false },
+  "assets": {
+    "directory": "./cloudflare/generated",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "leveltwo360",
+    "database_id": "00000000-0000-0000-0000-000000000001",
+    "migrations_dir": "official/migrations"
+  }],
+  "kv_namespaces": [{ "binding": "PHOTOS", "id": "00000000000000000000000000000001" }],
+  "durable_objects": { "bindings": [{ "name": "STAFF_LOGIN", "class_name": "StaffLogin" }] },
+  "migrations": [{ "tag": "staff-login-v1", "new_sqlite_classes": ["StaffLogin"] }],
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "vars": {
+    "OFFICIAL_DEPLOY": "1",
+    "STAFF_AUTH_MODE": "password",
+    "STAFF_ACCOUNTS": "1",
+    "TOUR_API_BACKEND": "durable-object",
+    "TOUR_UAC": "1",
+    "DIAGNOSTICS_ENABLED": "1",
+    "SCHEMA_REQUIRED": "4"
+  }
+}

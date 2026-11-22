@@ -238,3 +238,4 @@ for(const path of ['sharing/gallery.html','sharing/staff.html','staff/editor/ind
 await put('sharing/staff.js',"import {getAccess,applyAccess} from '/sharing/access-ui.js';\nconst access=await getAccess();\n"+await readFile(new URL('sharing/staff.js',output),'utf8'));
 
 for(const path of ['sharing/gallery.html','sharing/uac.html','sharing/staff-accounts.html'])await put(path,(await readFile(new URL(path,output),'utf8')).replace('<main>','<main><nav class="actions"><a href="/staff/migration">Migration Center</a> · <a href="/staff/help">Help</a>'+(path==='sharing/uac.html'?'<a href="/staff/diagnostics">Diagnostics</a>':'<a data-diagnostics href="/staff/diagnostics" hidden>Diagnostics</a>')+'</nav>'));
+for (const name of ['setup.html','setup.js','setup.css']) await copy('official/'+name,'official/'+name);

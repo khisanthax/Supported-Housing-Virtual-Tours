@@ -12,16 +12,17 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm test
-      - run: node cloudflare/prepare.mjs
+      - run: npm run test:official
   local-browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
+      - run: npm run test:official -- --browser
       - run: npm run test:local:browser
         env:
           LOCAL_TEST_OUTPUT: ${{ runner.temp }}/local-tours-evidence
