@@ -4,7 +4,7 @@
 
 Choose an installation owner authorized to manage the agency’s GitHub organization and Cloudflare account. Give a second authorized agency employee recovery access to both. Everyday staff sign in to LevelTwo360 separately.
 
-Cloudflare manages your subscription. The limited pilot uses Workers Free. Cloudflare's Deploy flow also accepts Paid accounts. Hosted verification on Paid is deferred. Setup requires Workers Builds, Worker assets, D1, KV and SQLite Durable Objects. Free usage limits can interrupt service. Paid usage and builds can incur charges. Your agency monitors usage and costs. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+Cloudflare manages your subscription. The limited pilot uses Workers Free, which passed hosted acceptance. The owner deferred Workers Paid hosted testing for a separate run. Setup requires Workers Builds, Worker assets, D1, KV and SQLite Durable Objects. Free usage limits can interrupt service. Paid usage and builds can incur charges. Your agency monitors usage and costs. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 ## Deploy from the official button
 

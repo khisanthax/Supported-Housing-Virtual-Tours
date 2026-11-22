@@ -1,5 +1,7 @@
 # LevelTwo360 deployment roadmap
 
+**Status on 22 November 2026.** Option A completed hosted acceptance for the limited Workers Free pilot. The owner deferred Workers Paid testing. The design and evaluation notes below record the original plan. For current instructions and evidence, use the [agency installation guide](official/README.md) and [pilot checklist](official/PILOT.md).
+
 Decision of 20 November 2026. **Option A, Cloudflare’s official Deploy button, is the priority for evaluation. Option B, the custom OAuth installer in draft PR #51, is deferred and available for future development.** The existing Wrangler installation procedure remains the documented route. Public Option A distribution awaits the acceptance work below.
 
 ## What an agency would do
