@@ -262,16 +262,21 @@ try {
   if(process.argv.includes('--codex')){
     const cliGrant=await createSupport(first,origin,cookie,['diagnostics','reset-diagnostics'],[],'Synthetic CLI rehearsal');
     const runCodex=async(prompt,expected)=>{
-      const {stdout}=await promisify(execFile)('codex',['exec','--ephemeral','--ignore-user-config','--sandbox','read-only','--json',
+      const child=promisify(execFile)('codex',['exec','--ephemeral','--ignore-user-config','--sandbox','read-only','--json',
         '-c','shell_environment_policy.inherit="none"',
         '-c','mcp_servers.leveltwo360.url="'+hubUrl+'/mcp"',
         '-c','mcp_servers.leveltwo360.bearer_token_env_var="LT360_HUB_TEST_TOKEN"',
+        '-c','mcp_servers.leveltwo360.default_tools_approval_mode="approve"',
         '-c','mcp_servers.leveltwo360.required=true',prompt],
       {cwd:root,env:{...process.env,LT360_HUB_TEST_TOKEN:ownerToken},timeout:120000,windowsHide:true});
+      child.child.stdin.end();
+      const {stdout}=await child;
       const actual=stdout.split(/\r?\n/).filter(line=>line.startsWith('{')).map(line=>JSON.parse(line))
         .filter(event=>event.type==='item.completed'&&event.item.type==='mcp_tool_call'&&event.item.server==='leveltwo360')
-        .map(event=>event.item.tool);
-      assert.deepEqual(actual,expected);
+        .map(event=>event.item);
+      assert.deepEqual(actual.map(item=>item.tool),expected);
+      for(const item of actual)assert.ok(item.status==='completed'&&!item.result?.isError,
+        item.tool+' failed: '+JSON.stringify(item.error??item.result));
     };
     await runCodex('Check LevelTwo360 help requests. Call only the list_requests MCP tool and report the tickets.', ['list_requests']);
     assert.equal((await call('get_request',{ticket:cliGrant.ticket})).status,'pending');

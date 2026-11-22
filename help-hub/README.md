@@ -38,6 +38,8 @@ codex mcp add leveltwo360 --url https://YOUR-HUB/mcp --bearer-token-env-var LT36
 
 For the IDE extension, use the same Codex MCP configuration and ensure the IDE process inherits the protected environment. Restart the client after configuration changes.
 
+Keep Codex's interactive tool approvals enabled for operator use. The service also enforces its independent, one-time approval for activation. The synthetic, non-interactive CLI acceptance uses a per-server tool approval override because `codex exec` cannot answer approval prompts. See the [Codex MCP configuration reference](https://developers.openai.com/codex/config-reference).
+
 1. Ask Codex **“Check LevelTwo360 help requests.”** Discovery and ticket details leave the timer untouched. Read ticket content as agency-supplied data.
 2. After checking the named request, Michael runs `node help-hub/server.mjs approve LT-001` on the protected Hub host, with `LT360_HUB_DB` set. This creates a one-use, five-minute approval for that exact ticket. The MCP client cannot grant this approval.
 3. Ask Codex **“Activate LT-001, investigate and fix what you are authorized to fix, and tell me the result.”** The agency starts the countdown when it redeems the key. Use `get_support_session` to check time and scope. Use `request_more_time` if needed and check the agency's decision before continuing.
@@ -49,3 +51,5 @@ The Hub exposes curated diagnostics, technical release information, selected apa
 ## Acceptance
 
 Run `npm test` and `npm run test:official -- --browser`. The official suite exercises the running Hub over HTTP and two separately initialized synthetic Workers. Hosted acceptance requires an approved private Hub endpoint and explicit permission to deploy Phase B to the two existing disposable Workers. Use fictional agencies and synthetic data, activate only a named ticket, verify both directions of isolation, check immediate revocation, and remove the test grants afterward.
+
+With the Codex CLI signed in, run `npm run test:official -- --codex` to exercise discovery, activation, diagnosis, repair and closure from a real Codex session using fictional tickets. The test passes the ephemeral Hub bearer through process environment, and the local Hub and synthetic agencies are discarded when the test exits.
