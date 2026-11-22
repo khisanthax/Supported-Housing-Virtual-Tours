@@ -12,4 +12,4 @@ This checklist requires explicit approval for the exact disposable Cloudflare Fr
 | Updates | Approve an additive upgrade against the agency’s own Git branch. Record before/after deployment IDs, retained credentials, data and bindings. Re-run and prove the migrations are idempotent. Roll back to a compatible retained version and verify sign-in. Test preview isolation and denied unreviewed promotion. |
 | Closeout | Revoke the disposable token and invitations, retain protected sanitized receipts, and agree on cleanup separately. Record exact observed Cloudflare permissions and UI steps. |
 
-Account-plan names are acceptance labels, never input to installation. Public release requires both hosted runs. Local workerd evidence does not establish provider UI, subscription behavior, Workers Builds token permissions, or runtime quota behavior.
+Account-plan names describe test evidence. Installation does not require proof of plan. The owner deferred the Workers Paid rehearsal. It is outside the limited Workers Free pilot decision. See the [pilot checklist and evidence](PILOT.md).
