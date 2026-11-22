@@ -299,3 +299,17 @@ The fresh hosted rehearsal awaits access to a signed-in Cloudflare dashboard tab
 Deployed the approved public repository root at `7742731` through the official button into isolated rehearsal resources. Cloudflare build `0370fe08` cloned the seed repository and pushed the application into the private destination without manual source recovery. The hosted build applied all seven migrations, deployed the Worker, printed its workers.dev address and the first-visit instructions, and reported success.
 
 Opening the printed address redirected to `/setup`. The deployment-time key enrolled a synthetic first Administrator, and sign-in opened the Apartment Gallery. Visiting setup again redirected to staff sign-in. The public legal page served the revised owner license and retained third-party notices. Hosted maintenance and the other subscription plan remain outside this evidence. No production or billing changes.
+
+### Hosted maintenance preflight
+
+Confirmed the two existing disposable Workers have distinct D1 and KV bindings. The older Worker was unclaimed with zero staff accounts. Applied the missing setup-window migration and deployed the reviewed template revision to that Worker, retaining its existing isolated bindings. On the source, signed in with a synthetic maintenance account, uploaded three procedural JPEGs, created a draft and enrolled a test editor. Hosted requests denied editor access to staff management, denied signed-out access to the draft and refused first-Administrator enrollment after the original claim.
+
+### Hosted encrypted backup and restore
+
+The maintenance tool produced and verified an encrypted backup with three JPEGs. A draft API request returned 503 while the backup lock was active. The restore rejected a wrong digest and refused to overwrite the initialized source. Restoring to the previously unclaimed Worker and retrying the same archive succeeded. The two installations matched on three staff rows, one apartment version and three photo records. All three restored JPEGs matched the original bytes. The test Administrator signed in on the destination and accessed the restored draft. The old source session was rejected there, and the restored editor remained unable to manage staff. The test used a fixture Administrator seeded only in the disposable source database, then used normal application sign-in and APIs.
+
+### Hosted Worker update and rollback
+
+Remote migration replay reported no pending migrations. Deployed a temporary `0.2.1-rehearsal` Worker revision to the existing source bindings via Wrangler. The version endpoint returned the new release and a different Worker version ID, and an existing session could still read the draft. Rolled back to the original retained Worker version. An immediate read still returned the newer version, so verification waited for propagation. A subsequent Cloudflare deployment read showed 100% of traffic assigned to the original version. Application sign-in and draft access passed, the pre-update fixture records matched the restored installation, and all three source JPEGs still matched its restored copies.
+
+This run used only the two authorized disposable Workers and their existing storage. The published template and license were unchanged. Second-plan testing still requires an authorized account on that plan.
