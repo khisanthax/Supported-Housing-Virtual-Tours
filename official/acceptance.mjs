@@ -7,7 +7,9 @@ import {generateKeyPairSync,randomBytes} from 'node:crypto';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {openInstallation,backUp,restore} from './maintenance.mjs';
 import {createHelpHub} from '../help-hub/server.mjs';
+import {supportInstallationId} from '../cloudflare/support.mjs';
 import {once} from 'node:events';
+import {createServer} from 'node:net';
 import {promisify} from 'node:util';
 
 const root=resolve(import.meta.dirname,'..');
@@ -170,17 +172,25 @@ try {
   await prepare(supportBDb);
   await expect(supportB,supportBOrigin,'/api/official/enroll',200,{method:'POST',body:{code,username:admin,password}});
   const supportBCookie=await login(supportB,supportBOrigin);
-  const agencyIds=(await Promise.all([site.db,supportBDb].map(db=>db.prepare('SELECT installation_id FROM official_installation').first()))).map(row=>row.installation_id);
+  const sharedRecoveryId=(await site.db.prepare('SELECT installation_id FROM official_installation').first()).installation_id;
+  await supportBDb.prepare('UPDATE official_installation SET installation_id=?').bind(sharedRecoveryId).run();
+  const agencyIds=[origin,supportBOrigin].map(agencyOrigin=>supportInstallationId(sharedRecoveryId,agencyOrigin));
   assert.notEqual(agencyIds[0],agencyIds[1]);
   const hubDb=join(path,'help-hub.sqlite');
   const ownerToken=randomBytes(32).toString('base64url');
+  const approvalToken=randomBytes(32).toString('base64url');
+  const portProbe=createServer().listen(0,'127.0.0.1');
+  await once(portProbe,'listening');
+  const hubPort=portProbe.address().port;
+  await new Promise(resolve=>portProbe.close(resolve));
+  hubUrl='http://127.0.0.1:'+hubPort;
   hub=createHelpHub({database:hubDb,ownerToken,key:randomBytes(32).toString('base64url'),
+    ownerApproval:{origin:hubUrl,token:approvalToken},
     agencies:[origin,supportBOrigin].map((origin,index)=>({id:agencyIds[index],origin,label:index?'Agency B':'Agency A',token:hubTokens[index]})),
     fetchAgency:(url,init)=>(new URL(url).origin===origin?first:supportB).dispatchFetch(url,init)
   });
-  hub.listen(0,'127.0.0.1');
+  hub.listen(hubPort,'127.0.0.1');
   await once(hub,'listening');
-  hubUrl='http://127.0.0.1:'+hub.address().port;
   const rpc=async(method,params={},token=ownerToken)=>{
     const reply=await fetch(hubUrl+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},
       body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
@@ -206,9 +216,18 @@ try {
   assert.ok((await rpc('tools/list')).tools.some(tool=>tool.name==='activate_support'));
   assert.deepEqual((await call('list_requests',{})).map(entry=>entry.agency),['Agency A','Agency B']);
   assert.equal((await call('get_request',{ticket:a.ticket})).status,'pending');
-  assert.match(await call('activate_support',{ticket:a.ticket},true),/owner approval/);
+  const approvalUrl=hubUrl+'/owner/approve/'+a.ticket;
+  assert.ok((await call('activate_support',{ticket:a.ticket},true)).includes(approvalUrl));
   assert.equal((await site.query('SELECT activated FROM support_grants WHERE id=?',[a.grant.id]))[0].activated,null);
-  execFileSync(process.execPath,['help-hub/server.mjs','approve',a.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+  const approvalPage=await fetch(approvalUrl);
+  assert.match(await approvalPage.text(),/Approve LT-001/);
+  assert.match(approvalPage.headers.get('content-security-policy'),/frame-ancestors 'none'/);
+  const approve=(credential,source=hubUrl)=>fetch(approvalUrl,{method:'POST',headers:{Origin:source},
+    body:new URLSearchParams({credential})});
+  assert.equal((await approve(ownerToken)).status,403);
+  assert.equal((await approve(approvalToken,'https://untrusted.example')).status,403);
+  assert.equal((await approve(approvalToken)).status,200);
+  assert.equal((await site.query('SELECT activated FROM support_grants WHERE id=?',[a.grant.id]))[0].activated,null);
   assert.match(await call('activate_support',{ticket:b.ticket},true),/owner approval/);
   const activations=await Promise.all([0,1].map(()=>rpc('tools/call',{name:'activate_support',arguments:{ticket:a.ticket}})));
   assert.equal(activations.filter(reply=>!reply.isError).length,1);

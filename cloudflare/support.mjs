@@ -21,6 +21,10 @@ export function supportEnabled(env) {
   return env.INSTALLATION_MODE==='agency' && env.SUPPORT_ENABLED==='1' && env.TOUR_UAC==='1';
 }
 
+export function supportInstallationId(id,origin) {
+  return digest(JSON.stringify(['leveltwo360-support-v1',id,origin]));
+}
+
 function hubClient(env) {
   if (!credential.test(env.SUPPORT_HUB_TOKEN??'')) return null;
   let url;
@@ -58,7 +62,7 @@ export async function serveSupport(request,env,db,{administrator,readJson,settin
   if (!supportEnabled(env) || url.origin!==env.APP_ORIGIN) return error('Support is unavailable.',404);
   if (request.method!=='GET' && request.headers.get('Origin')!==url.origin) return error('Open the support page on this installation.',403);
   if (admin && !administrator) return error('Administrator access required.',403);
-  const installation = env.INSTALLATION_ID;
+  const installation = supportInstallationId(env.INSTALLATION_ID,url.origin);
   const query = (sql,...args) => db.prepare(sql).bind(...args);
   const one = (sql,...args) => query(sql,...args).first();
   const list = async (sql,...args) => (await query(sql,...args).all()).results;
@@ -101,7 +105,7 @@ export async function serveSupport(request,env,db,{administrator,readJson,settin
       const apartments = await list(`SELECT v.apartment id,v.title FROM versions v WHERE v.seq=
         (SELECT max(seq) FROM versions WHERE apartment=v.apartment)
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=v.apartment AND state IN (2,3)) ORDER BY v.title`);
-      return response({grants:grants.map(view),events,apartments,hubAvailable:Boolean(hub),serverNow:Date.now()});
+      return response({grants:grants.map(view),events,apartments,installation,hubAvailable:Boolean(hub),serverNow:Date.now()});
     }
     if (request.method==='GET' && path===prefix+'admin/tickets') {
       if (!hub) return error('The Help Hub is not configured.',404);

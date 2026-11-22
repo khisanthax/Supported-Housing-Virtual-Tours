@@ -127,8 +127,14 @@ function send(res,status,value) {
   res.end(value===undefined?undefined:JSON.stringify(value));
 }
 
-export function createHelpHub({database,ownerToken,key,agencies,fetchAgency=fetch}) {
+export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fetchAgency=fetch}) {
   const config=configure({ownerToken,key,agencies});
+  if(ownerApproval) {
+    const url=new URL(ownerApproval.origin);
+    if(url.origin!==ownerApproval.origin||url.hostname!=='127.0.0.1'||
+      !isSecret(ownerApproval.token)||[ownerToken,key,...agencies.map(agency=>agency.token)].includes(ownerApproval.token))
+      throw Error('The owner approval page requires a loopback origin and a separate 256-bit credential.');
+  }
   const db=openStore(database);
   const {open,seal}=cipher(config.key);
   const get=seq=>db.prepare('SELECT * FROM tickets WHERE seq=?').get(seq);
@@ -183,7 +189,11 @@ export function createHelpHub({database,ownerToken,key,agencies,fetchAgency=fetc
     const now=Date.now();
     atomic(db,()=>{
       const result=db.prepare("UPDATE tickets SET status='activating',approved=NULL,transition=? WHERE seq=? AND status='pending' AND approved>? AND deadline>?").run(now,row.seq,now,now);
-      if(!result.changes) throw fail('This ticket requires a current, one-time owner approval.',409);
+      if(!result.changes) {
+        const link=ownerApproval&&row.status==='pending'&&row.deadline>now?
+          ' Open '+ownerApproval.origin+'/owner/approve/'+formatId(row.seq)+' to confirm, then retry this named ticket.':'';
+        throw fail('This ticket requires a current, one-time owner approval.'+link,409);
+      }
       event(db,row.seq,'activation_started');
     });
     try {
@@ -234,6 +244,31 @@ export function createHelpHub({database,ownerToken,key,agencies,fetchAgency=fetc
   }
   const server=createServer(async (request,res)=>{
     try {
+      const approvalRoute=/^\/owner\/approve\/(LT-\d{3,12})$/.exec(request.url);
+      if(approvalRoute&&ownerApproval&&request.headers.host===new URL(ownerApproval.origin).host&&request.socket.remoteAddress==='127.0.0.1'){
+        const [,id]=approvalRoute;
+        if(request.method==='GET'){
+          const page='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>LevelTwo360 activation approval</title>'+
+            '<main><h1>Approve activation for '+id+'</h1><p>This approval can be used once within five minutes. The agency session starts when Codex activates this ticket.</p>'+
+            '<form method="post"><label>Owner approval credential <input name="credential" type="password" required autocomplete="current-password"></label> '+
+            '<button>Approve '+id+'</button></form></main></html>';
+          res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer',
+            'Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});
+          return res.end(page);
+        }
+        if(request.method!=='POST') return send(res,405);
+        const contentType=request.headers['content-type']?.split(';')[0];
+        if(request.headers.origin!==ownerApproval.origin||contentType!=='application/x-www-form-urlencoded')return send(res,403,{error:'Use the local approval page.'});
+        let value='';
+        for await(const chunk of request) {
+          value+=chunk;
+          if(value.length>512)throw fail('Invalid approval request.',413);
+        }
+        if(!matches(new URLSearchParams(value).get('credential'),ownerApproval.token))return send(res,403,{error:'Owner approval credential rejected.'});
+        approveTicket(db,id);
+        res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
+        return res.end('Approved '+id+' for five minutes. Return to Codex and ask it to activate this ticket.');
+      }
       if(request.headers.origin) return send(res,403,{error:'Browser origins are not accepted.'});
       const token=request.headers.authorization?.match(/^Bearer (\S+)$/i)?.[1];
       if(request.url==='/agency/tickets'){
@@ -299,9 +334,12 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
       try {console.log('Approved '+approveTicket(db,process.argv[3])+' for five minutes.');}
       finally {db.close();}
     } else {
+      const port=Number(process.env.LT360_HUB_PORT??8789);
+      const approvalToken=process.env.LT360_HUB_APPROVAL_TOKEN;
       const server=createHelpHub({database,ownerToken:process.env.LT360_HUB_OWNER_TOKEN,key:process.env.LT360_HUB_ENCRYPTION_KEY,
+        ownerApproval:approvalToken?{origin:'http://127.0.0.1:'+port,token:approvalToken}:undefined,
         agencies:JSON.parse(readFileSync(process.env.LT360_HUB_AGENCIES,'utf8'))});
-      server.listen(Number(process.env.LT360_HUB_PORT??8789),'127.0.0.1',()=>console.log('LevelTwo360 Help Hub is listening on loopback.'));
+      server.listen(port,'127.0.0.1',()=>console.log('LevelTwo360 Help Hub is listening on loopback.'));
     }
   } catch(error) {
     console.error(error.status?error.message:'Could not start the Help Hub or approve a ticket. Check the local configuration.');
