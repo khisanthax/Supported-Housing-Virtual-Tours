@@ -337,4 +337,3 @@ GitHub reported PR #52 mergeable into `main` and all four checks passed on `5c49
 PR #52 can be presented for review. Merging needs the owner's explicit approval after review and green checks on the merge candidate. Review status, main, the public template and Worker deployments were left as found.
 
 The guide bundled in the pinned public template predates the hosted evidence and still describes build-token acceptance as pending. Share the current agency guide and pilot checklist from PR #52 alongside the approved Deploy link. Updating the bundled copy would require an approved template revision.
-
