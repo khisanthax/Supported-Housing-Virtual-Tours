@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Request technical support · LevelTwo360</title>
+<link rel="stylesheet" href="/support.css"><script type="module" src="/support.js"></script></head>
+<body><main>
+<a href="/staff">Apartment Gallery</a><h1>Request Technical Support</h1>
+<form id="create"><label for="support-hours">Duration</label> <select id="support-hours" name="hours"></select>
+<p>Support time starts when the technician activates the key. An unused key expires in 24 hours.</p>
+<fieldset><legend>Permissions</legend>
+<label><input type="checkbox" name="permission" value="diagnostics" checked> View diagnostics</label>
+<label><input type="checkbox" name="permission" value="settings"> View technical settings</label>
+<label><input type="checkbox" name="permission" value="reset-diagnostics"> Restore default diagnostic settings</label>
+<label><input type="checkbox" name="permission" value="apartments"> Inspect selected apartments</label>
+<label>Select apartments <select name="apartments" multiple size="5"></select></label></fieldset>
+<fieldset id="hub-option" hidden><legend>Help Hub</legend>
+<label><input type="checkbox" name="submitHub"> Send to the Help Hub</label>
+<label>Describe the technical issue <textarea name="issue" maxlength="500"></textarea></label>
+<p>Keep resident names, photos, passwords and private diagnostics out of the description.</p></fieldset>
+<button>Generate support key</button></form>
+<section id="issued" hidden><h2>Share this key securely</h2><p>Anyone with the unused key may activate it first. Use an approved secure channel.</p>
+<output id="key"></output><div><button id="copy">Copy Key</button> <button id="pdf">Download PDF</button> <button id="hide">Hide key</button></div></section>
+<p id="message" role="status"></p>
+<h2>Manage Support Access</h2><div id="grants"></div>
+<section id="hub-tickets" hidden><h2>Help Hub tickets</h2><div id="tickets"></div></section>
+<h2>Audit history</h2><ol id="audit"></ol>
+</main></body></html>

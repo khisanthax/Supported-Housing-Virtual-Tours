@@ -8,7 +8,7 @@ async function api(path,method='GET',body){const r=await fetch('/api/staff/'+pat
 async function operate(task){if(busy)return;busy=true;try{await task();}catch(e){$('message').textContent=e.message;}finally{busy=false;}}
 function action(text,task,cls='secondary'){const b=el('button',text,cls);b.type='button';b.onclick=()=>operate(task);return b;}
 async function refresh(){data=await api('dashboard');if(access.permissions!==null)uploads=await api('uploads');$('manage-uploads').hidden=access.permissions===null||!can(access,'uploads.manage');$('uploads-controls').hidden=!managing;
-$('staff-accounts').hidden=data.staffRole!=='administrator';$('catalog').replaceChildren();$('replace-apartment').replaceChildren(new Option('New apartment',''),...data.apartments.filter(a=>!a.archived).map(a=>new Option('Replace '+a.title,a.id)));
+$('staff-accounts').hidden=data.staffRole!=='administrator';const support=$('technical-support');if(support)support.hidden=!data.supportEnabled;$('catalog').replaceChildren();$('replace-apartment').replaceChildren(new Option('New apartment',''),...data.apartments.filter(a=>!a.archived).map(a=>new Option('Replace '+a.title,a.id)));
 const family=a=>/^Synthetic (Willow(?: revised)?|Maple|Cedar)$/.exec(a.title)?.[1]?.replace(' revised','');
 const latest=new Map();for(const a of data.apartments){const f=family(a);if(f&&(!latest.has(f)||a.recent>latest.get(f).recent))latest.set(f,a);}
 const shown=data.apartments.filter(a=>managing||$('all-demos').checked||!family(a)||latest.get(family(a)).id===a.id);

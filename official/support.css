@@ -1,0 +1,6 @@
+body{margin:0;font:1rem/1.55 system-ui;color:#183530;background:#eff5f2}
+main{max-width:48rem;margin:auto;padding:clamp(1rem,4vw,2rem);background:white;min-height:100vh;box-sizing:border-box}
+label,output{display:block;margin-block:.4rem}fieldset,section,article{margin-block:1rem;padding:1rem;border:1px solid #899d97}
+input,select,textarea,button{font:inherit}textarea,input[type=password]{display:block;width:min(100%,32rem);box-sizing:border-box}
+button{cursor:pointer;padding:.35rem .65rem;margin:.25rem 0}output,pre{overflow-wrap:anywhere;white-space:pre-wrap}
+[hidden]{display:none!important}:focus-visible{outline:3px solid #146d5a;outline-offset:2px}a{color:#075645}
