@@ -2,7 +2,7 @@
 
 ## Option A active storage maintenance
 
-Integrated the reviewed maintenance backport into the Option A development branch. The helper follows the version receiving 100% of live traffic and opens that version's D1 and KV bindings. Split traffic stops before storage is opened. Local acceptance and read-only hosted checks passed. The public template remains pinned to its existing release pending artifact validation and approval. Workers Paid acceptance remains deferred.
+Prepared the reviewed maintenance backport on the Option A integration branch. The helper follows the version receiving 100% of live traffic and opens that version's D1 and KV bindings. Split traffic stops before storage is opened. Local acceptance and read-only hosted checks passed. The PR #52 development ref and public template remain at their existing revisions. Workers Paid acceptance remains deferred.
 
 ## Deployment-time setup key and website handoff · 20 November 2026
 
