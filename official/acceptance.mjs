@@ -10,6 +10,7 @@ import {createHelpHub} from '../help-hub/server.mjs';
 import {supportInstallationId} from '../cloudflare/support.mjs';
 import {once} from 'node:events';
 import {createServer} from 'node:net';
+import {DatabaseSync} from 'node:sqlite';
 import {promisify} from 'node:util';
 
 const root=resolve(import.meta.dirname,'..');
@@ -177,22 +178,22 @@ try {
   const agencyIds=[origin,supportBOrigin].map(agencyOrigin=>supportInstallationId(sharedRecoveryId,agencyOrigin));
   assert.notEqual(agencyIds[0],agencyIds[1]);
   const hubDb=join(path,'help-hub.sqlite');
-  const ownerToken=randomBytes(32).toString('base64url');
+  let ownerToken=randomBytes(32).toString('base64url');
+  const hubKey=randomBytes(32).toString('base64url');
   const approvalToken=randomBytes(32).toString('base64url');
   const portProbe=createServer().listen(0,'127.0.0.1');
   await once(portProbe,'listening');
   const hubPort=portProbe.address().port;
   await new Promise(resolve=>portProbe.close(resolve));
   hubUrl='http://127.0.0.1:'+hubPort;
-  hub=createHelpHub({database:hubDb,ownerToken,key:randomBytes(32).toString('base64url'),
-    ownerApproval:{origin:hubUrl,token:approvalToken},
+  const hubConfig={database:hubDb,ownerToken,key:hubKey,ownerApproval:{origin:hubUrl,token:approvalToken},
     agencies:[origin,supportBOrigin].map((origin,index)=>({id:agencyIds[index],origin,label:index?'Agency B':'Agency A',token:hubTokens[index]})),
-    fetchAgency:(url,init)=>(new URL(url).origin===origin?first:supportB).dispatchFetch(url,init)
-  });
+    fetchAgency:(url,init)=>(new URL(url).origin===origin?first:supportB).dispatchFetch(url,init)};
+  hub=createHelpHub(hubConfig);
   hub.listen(hubPort,'127.0.0.1');
   await once(hub,'listening');
   const rpc=async(method,params={},token=ownerToken)=>{
-    const reply=await fetch(hubUrl+'/mcp',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},
+    const reply=await fetch(hubUrl+'/mcp',{method:'POST',headers:{Connection:'close',Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},
       body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
     if(!reply.ok)return {status:reply.status};
     return (await reply.json()).result;
@@ -274,7 +275,15 @@ try {
   const unused=await createSupport(first,origin,cookie);
   await site.query('UPDATE support_grants SET redeem_by=0 WHERE id=?',[unused.grant.id]);
   await supportPost(first,origin,'activate','',{key:unused.key},403);
+  await site.query(`INSERT INTO support_rate(installation,window,attempts) VALUES(?,?,12)
+    ON CONFLICT(installation) DO UPDATE SET window=excluded.window,attempts=12`,[agencyIds[0],Math.floor(Date.now()/60000)]);
+  const protectedGrant=await createSupport(first,origin,cookie);
+  const protectedSession=await supportPost(first,origin,'activate','',{key:protectedGrant.key});
+  await supportPost(first,origin,'end',protectedSession.headers.get('set-cookie').split(';')[0],{});
+  await site.query('DELETE FROM support_rate WHERE installation=?',[agencyIds[0]]);
   assert.ok(!(await readFile(hubDb)).includes(a.key));
+  assert.ok(!(await readFile(hubDb)).includes('Synthetic diagnostic repair'));
+  assert.ok(!(await readFile(hubDb)).includes('Synthetic repair completed.'));
   const records=JSON.stringify([await site.query('SELECT * FROM support_grants'),await site.query('SELECT * FROM support_audit')]);
   assert.ok(!records.includes(a.key)&&!records.includes(localGrant.key)&&!records.includes(fallbackCookie.split('=')[1]));
   for(const name of ['diagnostics_reset','extension_approved','revoked','ended'])assert.ok(records.includes(name));
@@ -305,6 +314,49 @@ try {
     assert.equal((await call('get_request',{ticket:cliGrant.ticket})).status,'closed');
     console.log('Authenticated Codex CLI discovery, activation, diagnosis, repair and closure passed through the running Help Hub.');
   }
+  const rotating=await createSupport(first,origin,cookie,['diagnostics'],[],'Synthetic key rotation');
+  execFileSync(process.execPath,['help-hub/server.mjs','approve',rotating.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+  await call('activate_support',{ticket:rotating.ticket});
+  await new Promise(resolve=>hub.close(resolve));
+  hub=null;
+  const originalOwner=ownerToken;
+  ownerToken=randomBytes(32).toString('base64url');
+  const rotatedKey=randomBytes(32).toString('base64url');
+  const rotatedApprovalToken=randomBytes(32).toString('base64url');
+  const rotatedAgencyToken=randomBytes(32).toString('base64url');
+  const legacyFixture=new DatabaseSync(hubDb);
+  legacyFixture.prepare('UPDATE tickets SET issue=?,issue_sealed=NULL WHERE seq=2').run('Synthetic legacy plaintext');
+  legacyFixture.close();
+  assert.throws(()=>createHelpHub({...hubConfig,key:rotatedKey}),/supplied encryption keys/);
+  hub=createHelpHub({...hubConfig,ownerToken,key:rotatedKey,previousKey:hubKey,
+    ownerApproval:{origin:hubUrl,token:rotatedApprovalToken},
+    agencies:[{...hubConfig.agencies[0],token:rotatedAgencyToken},hubConfig.agencies[1]]});
+  hub.listen(hubPort,'127.0.0.1');
+  await once(hub,'listening');
+  assert.deepEqual(await rpc('tools/list',{},originalOwner),{status:401});
+  const agencyRead=token=>fetch(hubUrl+'/agency/tickets',{headers:{Authorization:'Bearer '+token}});
+  assert.equal((await agencyRead(hubTokens[0])).status,401);
+  assert.equal((await agencyRead(rotatedAgencyToken)).status,200);
+  assert.equal((await call('get_request',{ticket:b.ticket})).issue,'Synthetic legacy plaintext');
+  assert.ok(!(await readFile(hubDb)).includes('Synthetic legacy plaintext'));
+  assert.ok((await call('get_request',{ticket:a.ticket})).history.some(entry=>entry.note==='Synthetic repair completed.'));
+  await call('view_diagnostics',{ticket:rotating.ticket});
+  await call('end_support',{ticket:rotating.ticket});
+  execFileSync(process.execPath,['help-hub/server.mjs','purge',rotating.ticket],{cwd:root,env:{...process.env,LT360_HUB_DB:hubDb}});
+  await call('get_request',{ticket:rotating.ticket},true);
+  const confirmation=await createSupport(supportB,supportBOrigin,supportBCookie,['diagnostics'],[],'Synthetic approval rotation');
+  const approveRotated=credential=>fetch(hubUrl+'/owner/approve/'+confirmation.ticket,{method:'POST',
+    headers:{Origin:hubUrl},body:new URLSearchParams({credential})});
+  assert.equal((await approveRotated(approvalToken)).status,403);
+  assert.equal((await approveRotated(rotatedApprovalToken)).status,200);
+  assert.equal((await call('get_request',{ticket:confirmation.ticket})).status,'pending');
+  const historyFixture=new DatabaseSync(hubDb);
+  historyFixture.prepare('UPDATE tickets SET transition=0 WHERE seq=1').run();
+  historyFixture.close();
+  await call('get_request',{ticket:a.ticket},true);
+  const retainedFixture=new DatabaseSync(hubDb);
+  assert.equal(retainedFixture.prepare('SELECT count(*) n FROM history WHERE ticket=1').get().n,0);
+  retainedFixture.close();
   await new Promise(resolve=>hub.close(resolve));
   hub=null;
   const offline=await createSupport(first,origin,cookie,['diagnostics'],[],'Synthetic Hub outage');
@@ -394,6 +446,16 @@ try {
     return Response.json({success:true,result:[{success:true,results:await site.query(input.sql,input.params)}]});
   }});
   assert.equal(adapter.origin,origin);
+  await assert.rejects(openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async url=>{
+    if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
+    assert.ok(url.endsWith('/deployments'),'Split traffic must stop before reading bindings or storage.');
+    return Response.json({success:true,result:{deployments:[
+      {created_on:'2026-11-02T00:00:00Z',versions:[
+        {version_id:activeWorker,percentage:75},
+        {version_id:'00000000-0000-0000-0000-000000000011',percentage:25}
+      ]}
+    ]}});
+  }}),/Route all traffic to one reviewed Worker version/);
   assert.match((await adapter.query('SELECT origin FROM official_installation'))[0].origin,/synthetic-agency/);
   // A genuinely different Worker deployment reuses the same storage. Miniflare
   // reloads Worker modules over its current namespace bindings.

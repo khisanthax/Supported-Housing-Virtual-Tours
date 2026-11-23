@@ -76,12 +76,6 @@ export async function serveSupport(request,env,db,{administrator,readJson,settin
     WHERE installation=? AND ended IS NULL AND revoked IS NULL AND coalesce(expires,redeem_by)<=${databaseNow}`,installation);
 
   if (request.method==='POST' && path===prefix+'activate') {
-    const bucket = Math.floor(now/60000);
-    const limit = await one(`INSERT INTO support_rate(installation,window,attempts) VALUES(?,?,1)
-      ON CONFLICT(installation) DO UPDATE SET window=excluded.window,
-      attempts=CASE WHEN support_rate.window=excluded.window THEN support_rate.attempts+1 ELSE 1 END
-      WHERE support_rate.window<>excluded.window OR support_rate.attempts<12 RETURNING attempts`,installation,bucket);
-    if (!limit) return error('Too many attempts. Try again in a minute.',429);
     const {key,grantId} = await readJson(request,4096) ?? {};
     if (grantId!==undefined && (typeof grantId!=='string' || !idPattern.test(grantId))) return error('Invalid support request.',400);
     const session = secret();
@@ -90,6 +84,14 @@ export async function serveSupport(request,env,db,{administrator,readJson,settin
       WHERE installation=? AND invite_digest=? AND activated IS NULL AND revoked IS NULL AND ended IS NULL
       AND (? IS NULL OR id=?) AND redeem_by>${databaseNow} RETURNING *`,hour,digest(session),installation,digest(key),grantId??null,grantId??null);
     if (!row) {
+      // Anonymous failures share a budget for audit writes only. A valid,
+      // high-entropy grant always reaches its single-use database claim.
+      const bucket = Math.floor(now/60000);
+      const limit = await one(`INSERT INTO support_rate(installation,window,attempts) VALUES(?,?,1)
+        ON CONFLICT(installation) DO UPDATE SET window=excluded.window,
+        attempts=CASE WHEN support_rate.window=excluded.window THEN support_rate.attempts+1 ELSE 1 END
+        WHERE support_rate.window<>excluded.window OR support_rate.attempts<12 RETURNING attempts`,installation,bucket);
+      if (!limit) return error('The activation key could not be accepted.',429);
       await audit(null,'activation_rejected','support');
       return error('The activation key is invalid, expired or already used.',403);
     }

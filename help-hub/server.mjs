@@ -8,6 +8,7 @@ const credential=/^[A-Za-z0-9_-]{43}$/;
 const ticketId=/^LT-\d{3,12}$/;
 const grantId=/^[a-f0-9]{32}$/;
 const hour=3600000;
+const retention=30*24*hour;
 const cookie='__Host-lt360-support';
 const protocols=['2025-11-25','2025-06-18','2025-03-26'];
 const isSecret=value=>typeof value==='string'&&credential.test(value)&&Buffer.from(value,'base64url').toString('base64url')===value;
@@ -34,7 +35,7 @@ const tools=Object.entries(operations).map(([name,[description,properties]])=>({
 
 function openStore(filename) {
   const db=new DatabaseSync(filename);
-  db.exec(`PRAGMA busy_timeout=3000;
+  db.exec(`PRAGMA busy_timeout=3000; PRAGMA secure_delete=ON;
     CREATE TABLE IF NOT EXISTS tickets (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, agency TEXT NOT NULL, grant_id TEXT NOT NULL,
       issue TEXT NOT NULL, hours INTEGER NOT NULL, deadline INTEGER NOT NULL, created INTEGER NOT NULL,
@@ -42,6 +43,11 @@ function openStore(filename) {
     CREATE TABLE IF NOT EXISTS history (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, ticket INTEGER NOT NULL, event TEXT NOT NULL, at INTEGER NOT NULL, note TEXT);
     CREATE INDEX IF NOT EXISTS ticket_history ON history(ticket,seq);`);
+  for(const [table,column,type] of [['tickets','issue_sealed','TEXT'],['tickets','session_expires','INTEGER'],
+    ['history','note_sealed','TEXT']]){
+    if(!db.prepare('PRAGMA table_info('+table+')').all().some(item=>item.name===column))
+      db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+type);
+  }
   return db;
 }
 
@@ -61,7 +67,8 @@ function atomic(db,operation) {
     throw error;
   }
 }
-const event=(db,seq,name,note=null)=>db.prepare('INSERT INTO history(ticket,event,at,note) VALUES(?,?,?,?)').run(seq,name,Date.now(),note);
+const event=(db,seq,name)=>db.prepare('INSERT INTO history(ticket,event,at) VALUES(?,?,?)').run(seq,name,Date.now());
+const inactive="status NOT IN ('pending','activating','active')";
 
 export function approveTicket(db,id) {
   return atomic(db,()=>{
@@ -73,10 +80,24 @@ export function approveTicket(db,id) {
   });
 }
 
-function configure({ownerToken,key,agencies}) {
+function purgeTicket(db,id) {
+  return atomic(db,()=>{
+    const seq=seqFor(id);
+    const changed=db.prepare('DELETE FROM tickets WHERE seq=? AND '+inactive).run(seq);
+    if(!changed.changes)throw fail('Only a closed ticket can be purged.',409);
+    db.prepare('DELETE FROM history WHERE ticket=?').run(seq);
+    return formatId(seq);
+  });
+}
+
+function configure({ownerToken,key,previousKey,agencies}) {
   if(!isSecret(ownerToken)||!isSecret(key)|| !Array.isArray(agencies)) throw Error('Configure separate 256-bit Hub credentials.');
   const used=new Set([ownerToken,key]);
   if(used.size!==2) throw Error('Hub secrets must be distinct.');
+  if(previousKey!==undefined){
+    if(!isSecret(previousKey)||used.has(previousKey))throw Error('Provide the distinct previous encryption key for rotation.');
+    used.add(previousKey);
+  }
   const map=new Map();
   for(const agency of agencies) {
     const {id,origin,label,token}=agency;
@@ -87,7 +108,7 @@ function configure({ownerToken,key,agencies}) {
     map.set(id,agency);
     used.add(token);
   }
-  return {ownerToken,key:Buffer.from(key,'base64url'),agencies:map};
+  return {ownerToken,key:Buffer.from(key,'base64url'),previousKey:previousKey&&Buffer.from(previousKey,'base64url'),agencies:map};
 }
 
 function cipher(key) {
@@ -127,37 +148,105 @@ function send(res,status,value) {
   res.end(value===undefined?undefined:JSON.stringify(value));
 }
 
-export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fetchAgency=fetch}) {
-  const config=configure({ownerToken,key,agencies});
+export function createHelpHub({database,ownerToken,key,previousKey,agencies,ownerApproval,fetchAgency=fetch}) {
+  const config=configure({ownerToken,key,previousKey,agencies});
   if(ownerApproval) {
     const url=new URL(ownerApproval.origin);
     if(url.origin!==ownerApproval.origin||url.hostname!=='127.0.0.1'||
-      !isSecret(ownerApproval.token)||[ownerToken,key,...agencies.map(agency=>agency.token)].includes(ownerApproval.token))
+      !isSecret(ownerApproval.token)||[ownerToken,key,previousKey,...agencies.map(agency=>agency.token)].includes(ownerApproval.token))
       throw Error('The owner approval page requires a loopback origin and a separate 256-bit credential.');
   }
   const db=openStore(database);
   const {open,seal}=cipher(config.key);
   const get=seq=>db.prepare('SELECT * FROM tickets WHERE seq=?').get(seq);
   const context=(row,type)=>JSON.stringify([row.agency,row.seq,row.grant_id,type]);
+  const noteContext=(row,sequence)=>context(row,'note:'+sequence);
+  // Rewrite legacy plaintext and, when requested, rotate all encrypted fields
+  // in one transaction before the HTTP listener can be opened.
+  try{
+    const previous=config.previousKey&&cipher(config.previousKey);
+    const rotate=(value,aad)=>{
+      if(!previous||!value)return value;
+      try {open(value,aad);return value;}catch{return seal(previous.open(value,aad),aad);}
+    };
+    atomic(db,()=>{
+      const writeTicket=db.prepare("UPDATE tickets SET issue='',issue_sealed=?,sealed=? WHERE seq=?");
+      for(const row of db.prepare('SELECT * FROM tickets').all()){
+        const issue=row.issue_sealed?rotate(row.issue_sealed,context(row,'issue')):seal(row.issue,context(row,'issue'));
+        const credentialType=row.status==='active'?'session':'key';
+        const stored=rotate(row.sealed,context(row,credentialType));
+        if(stored)open(stored,context(row,credentialType));
+        if(previous||!row.issue_sealed)writeTicket.run(issue,stored,row.seq);
+        if(row.issue_sealed||previous)open(issue,context(row,'issue'));
+      }
+      const writeNote=db.prepare('UPDATE history SET note=NULL,note_sealed=? WHERE seq=?');
+      const ticketsWithNotes=db.prepare('SELECT * FROM history WHERE note IS NOT NULL OR note_sealed IS NOT NULL').all();
+      for(const entry of ticketsWithNotes){
+        const row=get(entry.ticket);
+        if(!row){db.prepare('DELETE FROM history WHERE seq=?').run(entry.seq);continue;}
+        const aad=noteContext(row,entry.seq);
+        const note=entry.note_sealed?rotate(entry.note_sealed,aad):seal(entry.note,aad);
+        if(previous||!entry.note_sealed)writeNote.run(note,entry.seq);
+        if(entry.note_sealed||previous)open(note,aad);
+      }
+    });
+  }catch{
+    db.close();
+    throw Error('The Help Hub database could not be opened with the supplied encryption keys.');
+  }
   const describe=row=>({ticket:formatId(row.seq),agency:config.agencies.get(row.agency)?.label??'Disconnected agency',
-    issue:row.issue,hours:row.hours,status:row.status,activationDeadline:row.deadline,created:row.created});
-  const details=row=>({...describe(row),history:db.prepare('SELECT event,at,note FROM history WHERE ticket=? ORDER BY seq DESC LIMIT 100').all(row.seq)});
+    issue:open(row.issue_sealed,context(row,'issue')),hours:row.hours,status:row.status,activationDeadline:row.deadline,created:row.created});
+  const details=row=>({...describe(row),history:db.prepare('SELECT seq,event,at,note_sealed FROM history WHERE ticket=? ORDER BY seq DESC LIMIT 100').all(row.seq)
+    .map(entry=>({event:entry.event,at:entry.at,note:entry.note_sealed?open(entry.note_sealed,noteContext(row,entry.seq)):null}))});
 
   function reconcile() {
     const now=Date.now();
     for(const [before,after,limit] of [['pending','key_expired',now],['activating','activation_failed',now-15000]]) {
       const field=before==='pending'?'deadline':'transition';
       atomic(db,()=>{
-        const closed=db.prepare(`UPDATE tickets SET status=?,sealed=NULL,approved=NULL WHERE status=? AND ${field}<=? RETURNING seq`).all(after,before,limit);
+        const closed=db.prepare(`UPDATE tickets SET status=?,sealed=NULL,approved=NULL,transition=? WHERE status=? AND ${field}<=? RETURNING seq`).all(after,now,before,limit);
         for(const row of closed) event(db,row.seq,after);
       });
     }
+    atomic(db,()=>{
+      const overdue='SELECT seq FROM tickets WHERE '+inactive+' AND coalesce(transition,created)<=?';
+      db.prepare('DELETE FROM history WHERE at<=? OR ticket IN ('+overdue+')').run(now-retention,now-retention);
+      db.prepare('DELETE FROM tickets WHERE seq IN ('+overdue+')').run(now-retention);
+    });
   }
-  const timer=setInterval(reconcile,60000);
+  let sweeping=false,stopping=false;
+  const timer=setInterval(async()=>{
+    if(sweeping||stopping)return;
+    sweeping=true;
+    try{
+      reconcile();
+      const due=db.prepare("SELECT * FROM tickets WHERE status='active' AND coalesce(session_expires,0)<=? ORDER BY session_expires LIMIT 8").all(Date.now());
+      await Promise.all(due.map(async row=>{
+        try{
+          const response=await agencyRequest(row,'session',{session:open(row.sealed,context(row,'session'))});
+          const {expires}=await response.json();
+          if(!stopping&&rememberExpiry(row,expires))return;
+        }catch{}
+        if(!stopping)update(row,'active','closed',null,null,Date.now());
+      }));
+    }catch{
+      // Startup and request errors are reported to the operator without
+      // logging private rows. A transient timer failure is retried.
+    }finally{
+      sweeping=false;
+      if(stopping)db.close();
+    }
+  },60000);
   timer.unref();
-  function update(row,before,after,sealed=null) {
+  function rememberExpiry(row,expires){
+    if(!Number.isSafeInteger(expires)||expires<=Date.now())return false;
+    db.prepare("UPDATE tickets SET session_expires=max(coalesce(session_expires,0),?) WHERE seq=? AND status='active'").run(expires,row.seq);
+    return true;
+  }
+  function update(row,before,after,sealed=null,expires=null,deadline=null) {
     return atomic(db,()=>{
-      const result=db.prepare('UPDATE tickets SET status=?,sealed=? WHERE seq=? AND status=?').run(after,sealed,row.seq,before);
+      const result=db.prepare(`UPDATE tickets SET status=?,sealed=?,session_expires=?,transition=? WHERE seq=? AND status=?
+        AND (? IS NULL OR coalesce(session_expires,0)<=?)`).run(after,sealed,expires,Date.now(),row.seq,before,deadline,deadline);
       if(result.changes) event(db,row.seq,after);
       return Boolean(result.changes);
     });
@@ -177,7 +266,7 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
         method:command?'POST':'GET',body:command?JSON.stringify(key?{key,grantId:row.grant_id}:{}):undefined});
     } catch {throw fail('The agency is temporarily unreachable.',503);}
     if(!response.ok) {
-      if(response.status===401&&row.status==='active') update(row,'active','closed');
+      if(!stopping&&response.status===401&&row.status==='active') update(row,'active','closed');
       throw fail(response.status===401?'Agency support has ended.':
         response.status===403?'The agency denied this operation.':
         response.status===409?'This action is no longer available.':
@@ -200,8 +289,8 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
       const response=await agencyRequest(row,'activate',{command:true,key:open(row.sealed,context(row,'key'))});
       const {id,hours,expires,permissions,apartments}=await response.json();
       const session=response.headers.get('set-cookie')?.match(/^__Host-lt360-support=([A-Za-z0-9_-]{43});/)?.[1];
-      if(id!==row.grant_id||hours!==row.hours||!isSecret(session)) throw fail('Agency activation did not match this ticket.',409);
-      if(!update(row,'activating','active',seal(session,context(row,'session')))) throw fail('Activation could not be confirmed.',409);
+      if(id!==row.grant_id||hours!==row.hours||!isSecret(session)||!Number.isSafeInteger(expires)||expires<=Date.now()) throw fail('Agency activation did not match this ticket.',409);
+      if(!update(row,'activating','active',seal(session,context(row,'session')),expires)) throw fail('Activation could not be confirmed.',409);
       return {ticket:formatId(row.seq),status:'active',expires,permissions,apartments};
     } catch {
       update(row,'activating','activation_failed');
@@ -225,7 +314,11 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
     if(name==='send_note') {
       const note=args.note.trim();
       if(!note||/[A-Za-z0-9_-]{43,}/.test(note)) throw fail('Enter a short note without credentials.');
-      event(db,row.seq,'owner_note',note);
+      atomic(db,()=>{
+        const entry=event(db,row.seq,'owner_note');
+        const sequence=entry.lastInsertRowid;
+        db.prepare('UPDATE history SET note_sealed=? WHERE seq=?').run(seal(note,noteContext(row,sequence)),sequence);
+      });
       return {sent:true};
     }
     if(row.status!=='active') throw fail('This ticket has no Hub session.',409);
@@ -236,7 +329,9 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
       const response=await agencyRequest(row,paths[name],{session:open(row.sealed,context(row,'session')),command});
       if(name==='end_support') update(row,'active','closed');
       if(name!=='get_support_session') event(db,row.seq,name);
-      return await response.json();
+      const result=await response.json();
+      if(name==='get_support_session'||name==='request_more_time')rememberExpiry(row,result.expires);
+      return result;
     } catch(error) {
       if(name!=='get_support_session') event(db,row.seq,name+'_failed');
       throw error;
@@ -289,9 +384,10 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
           if(existing) return existing;
           const count=db.prepare('SELECT count(*) n FROM tickets WHERE agency=? AND created>?').get(agency.id,now-hour);
           if(count.n>=20) throw fail('Too many recent tickets.',429);
-          const created=db.prepare("INSERT INTO tickets(agency,grant_id,issue,hours,deadline,created,status) VALUES(?,?,?,?,?,?,'pending') RETURNING *")
-            .get(agency.id,grant,issue.trim(),hours,deadline,now);
-          db.prepare('UPDATE tickets SET sealed=? WHERE seq=?').run(seal(key,context(created,'key')),created.seq);
+          const created=db.prepare("INSERT INTO tickets(agency,grant_id,issue,hours,deadline,created,status) VALUES(?,?,'',?,?,?,'pending') RETURNING *")
+            .get(agency.id,grant,hours,deadline,now);
+          db.prepare('UPDATE tickets SET sealed=?,issue_sealed=? WHERE seq=?')
+            .run(seal(key,context(created,'key')),seal(issue.trim(),context(created,'issue')),created.seq);
           event(db,created.seq,'submitted');
           return created;
         });
@@ -321,7 +417,7 @@ export function createHelpHub({database,ownerToken,key,agencies,ownerApproval,fe
     }
   });
   server.requestTimeout=10000;
-  server.on('close',()=>{clearInterval(timer);db.close();});
+  server.on('close',()=>{stopping=true;clearInterval(timer);if(!sweeping)db.close();});
   return server;
 }
 
@@ -329,14 +425,18 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   try {
     const database=process.env.LT360_HUB_DB;
     if(!database) throw Error();
-    if(process.argv[2]==='approve') {
+    if(['approve','purge'].includes(process.argv[2])) {
       const db=openStore(database);
-      try {console.log('Approved '+approveTicket(db,process.argv[3])+' for five minutes.');}
+      try {
+        if(process.argv[2]==='approve')console.log('Approved '+approveTicket(db,process.argv[3])+' for five minutes.');
+        else console.log('Purged '+purgeTicket(db,process.argv[3])+'.');
+      }
       finally {db.close();}
     } else {
       const port=Number(process.env.LT360_HUB_PORT??8789);
       const approvalToken=process.env.LT360_HUB_APPROVAL_TOKEN;
       const server=createHelpHub({database,ownerToken:process.env.LT360_HUB_OWNER_TOKEN,key:process.env.LT360_HUB_ENCRYPTION_KEY,
+        previousKey:process.env.LT360_HUB_PREVIOUS_ENCRYPTION_KEY,
         ownerApproval:approvalToken?{origin:'http://127.0.0.1:'+port,token:approvalToken}:undefined,
         agencies:JSON.parse(readFileSync(process.env.LT360_HUB_AGENCIES,'utf8'))});
       server.listen(port,'127.0.0.1',()=>console.log('LevelTwo360 Help Hub is listening on loopback.'));
