@@ -120,7 +120,8 @@ if(create){
       });
     }
     const audit=byId('audit');audit.replaceChildren();
-    for(const event of events)add(audit,'li',(descriptions[event.event]??event.event)+' · '+date(event.at)+' · '+event.actor);
+    for(const event of events)add(audit,'li',(descriptions[event.event]??event.event)+' · '+date(event.at)+' · '+event.actor+
+      (event.restored?' · Restored from backup':''));
     tick();
   }
   async function refreshTickets(){

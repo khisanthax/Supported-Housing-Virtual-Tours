@@ -120,7 +120,7 @@ try {
   };
   const supportVars=index=>({...vars,SUPPORT_ENABLED:'1',SUPPORT_HUB_ORIGIN:hubOrigin,SUPPORT_HUB_TOKEN:hubTokens[index]});
   const first=runtime(source,{...supportVars(0),LT360_INSTALL_KEY:code},hubOutbound);resources.push(first);
-  const second=runtime(source,{...vars,LT360_SETUP_CODE:otherCode});resources.push(second);
+  const second=runtime(source,{...vars,LT360_SETUP_CODE:otherCode,SUPPORT_ENABLED:'1'});resources.push(second);
   const disabled=runtime(source,vars);resources.push(disabled);
   const expired=runtime(source,{...vars,LT360_INSTALL_KEY:code});resources.push(expired);
   const site=await toSite(first,origin), target=await toSite(second,restoredOrigin);
@@ -365,6 +365,10 @@ try {
   assert.deepEqual(await target.query('SELECT * FROM access_history'),savedAudit);
   for(const id of Object.values(photos))assert.deepEqual(await target.readImage(id),await site.readImage(id));
   const newCookie=await login(second,restoredOrigin);
+  const restoredSupport=await (await expect(second,restoredOrigin,'/api/support/admin',200,{cookie:newCookie})).json();
+  assert.notEqual(restoredSupport.installation,(await (await expect(first,origin,'/api/support/admin',200,{cookie})).json()).installation);
+  assert.equal(restoredSupport.grants.length,0);
+  assert.ok(restoredSupport.events.some(event=>event.event==='activated'&&event.restored));
   await expect(second,restoredOrigin,'/api/staff/drafts/'+apartment.id,200,{cookie:newCookie});
   await expect(second,restoredOrigin,'/api/staff/drafts/'+apartment.id,401,{cookie});
   await expect(second,restoredOrigin,'/api/official/enroll',409,{method:'POST',body:{code:otherCode,username:'cannot-reset',password}});
@@ -372,14 +376,19 @@ try {
   assert.equal((await target.query('SELECT count(*) n FROM staff_accounts'))[0].n,2);
   // Exercise production API routing against synthetic Cloudflare responses.
   const account='1'.repeat(32);
+  const activeWorker='00000000-0000-0000-0000-000000000012';
   const adapter=await openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async(url,request)=>{
     assert.match(url,new RegExp('^https://api.cloudflare.com/client/v4/accounts/'+account+'/'));
     assert.equal(request.headers.Authorization,'Bearer fixture-only');
     if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
-    if(url.endsWith('/settings'))return Response.json({success:true,result:{bindings:[
+    if(url.endsWith('/deployments'))return Response.json({success:true,result:{deployments:[
+      {created_on:'2026-11-01T00:00:00Z',versions:[{version_id:'00000000-0000-0000-0000-000000000011',percentage:100}]},
+      {created_on:'2026-11-02T00:00:00Z',versions:[{version_id:activeWorker,percentage:100}]}
+    ]}});
+    if(url.endsWith('/versions/'+activeWorker))return Response.json({success:true,result:{resources:{bindings:[
       {name:'DB',type:'d1',id:dbName},{name:'PHOTOS',type:'kv_namespace',namespace_id:kv},
       {name:'OFFICIAL_DEPLOY',type:'plain_text',text:'1'},{name:'STAFF_LOGIN',type:'durable_object_namespace',class_name:'StaffLogin'}
-    ]}});
+    ]}}});
     const input=JSON.parse(request.body);
     assert.ok(url.endsWith('/d1/database/'+dbName+'/query'));
     return Response.json({success:true,result:[{success:true,results:await site.query(input.sql,input.params)}]});

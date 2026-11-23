@@ -101,7 +101,12 @@ export async function serveSupport(request,env,db,{administrator,readJson,settin
     await closeExpired();
     if (request.method==='GET' && path===prefix+'admin') {
       const grants = await list('SELECT * FROM support_grants WHERE installation=? ORDER BY created DESC LIMIT 100',installation);
-      const events = await list('SELECT seq,grant_id,event,actor,at,detail FROM support_audit WHERE installation=? ORDER BY seq DESC LIMIT 100',installation);
+      // Each Worker owns its D1. Only a verified installation restore can bring
+      // historical audit rows from another origin into this database.
+      const events = await list(`SELECT seq,grant_id,event,actor,at,detail,installation<>? AS restored
+        FROM support_audit WHERE installation=? OR EXISTS (
+          SELECT 1 FROM official_installation WHERE id=1 AND restored_from IS NOT NULL
+        ) ORDER BY seq DESC LIMIT 100`,installation,installation);
       const apartments = await list(`SELECT v.apartment id,v.title FROM versions v WHERE v.seq=
         (SELECT max(seq) FROM versions WHERE apartment=v.apartment)
         AND NOT EXISTS(SELECT 1 FROM apartment_visibility WHERE apartment=v.apartment AND state IN (2,3)) ORDER BY v.title`);

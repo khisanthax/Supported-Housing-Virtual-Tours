@@ -38,6 +38,7 @@ codex mcp add leveltwo360 --url https://YOUR-HUB/mcp --bearer-token-env-var LT36
 ```
 
 For the IDE extension, use the same Codex MCP configuration and ensure the IDE process inherits the protected environment. Restart the client after configuration changes.
+Use a model offered by the installed client for your account. An older extension can reject a model selected in a newer desktop app even when MCP is connected.
 
 Keep Codex's interactive tool approvals enabled for operator use. The service also enforces its independent, one-time approval for activation. The synthetic, non-interactive CLI acceptance uses a per-server tool approval override because `codex exec` cannot answer approval prompts. See the [Codex MCP configuration reference](https://developers.openai.com/codex/config-reference).
 
