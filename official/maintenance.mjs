@@ -46,10 +46,20 @@ export async function openInstallation({account,worker,token,fetcher=fetch}){
     if (!result.success) throw new MaintenanceError('Cloudflare rejected the operation. Check the selected resources and token permissions.');
     return result;
   }
-  const [{result:settings},{result:domain}]=await Promise.all([
-    api('/workers/scripts/'+worker+'/settings'),api('/workers/subdomain')
+  const script='/workers/scripts/'+worker;
+  const [{result:history},{result:domain}]=await Promise.all([
+    api(script+'/deployments'),api('/workers/subdomain')
   ]);
-  const binding = (bindingName,type) => settings.bindings?.find(item=>item.name===bindingName&&item.type===type);
+  const deployments=history?.deployments;
+  if(!Array.isArray(deployments)||!deployments.length||deployments.some(item=>!Number.isFinite(Date.parse(item.created_on))))
+    throw new MaintenanceError('Cloudflare did not identify the active Worker deployment.');
+  const latest=[...deployments].sort((a,b)=>Date.parse(b.created_on)-Date.parse(a.created_on))[0];
+  const [active]=latest.versions??[];
+  if(latest.versions?.length!==1||active?.percentage!==100||!uuid.test(active.version_id??''))
+    throw new MaintenanceError('Route all traffic to one reviewed Worker version before maintenance.');
+  // Script settings can describe a newer upload than the version serving traffic.
+  const {result:version}=await api(script+'/versions/'+active.version_id);
+  const binding = (bindingName,type) => version?.resources?.bindings?.find(item=>item.name===bindingName&&item.type===type);
   const database = binding('DB','d1')?.id;
   const namespace = binding('PHOTOS','kv_namespace')?.namespace_id;
   if (!uuid.test(database??'') || !id.test(namespace??'') || !name.test(domain.subdomain??'') ||

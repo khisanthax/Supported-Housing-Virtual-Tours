@@ -333,3 +333,7 @@ GitHub reported PR #52 mergeable into `main` and all four checks passed on `5c49
 PR #52 can be presented for review. Merging needs the owner's explicit approval after review and green checks on the merge candidate. Review status, main, the public template and Worker deployments were left as found.
 
 The guide bundled in the pinned public template predates the hosted evidence and still describes build-token acceptance as pending. Share the current agency guide and pilot checklist from PR #52 alongside the approved Deploy link. Updating the bundled copy would require an approved template revision.
+
+## Option A active storage maintenance backport
+
+Prepared this branch from the reviewed Option A head. The maintenance helper now uses the Worker version with 100% of live traffic and opens its D1 and KV bindings. A partial or split deployment fails before the tool opens storage. Local acceptance checks the Cloudflare API selection and tests split-traffic refusal. The two verified disposable Workers confirmed active-version D1 selection after rollback. This backport requires review before integration and artifact validation before a new template release. No change to PR #52, the public template, or Workers Paid acceptance.

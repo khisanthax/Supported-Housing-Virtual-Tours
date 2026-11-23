@@ -28,7 +28,9 @@ The [pilot checklist](PILOT.md) includes common installation issues, who handles
 
 Use the existing [encrypted apartment export](../BACKUPS.md) for routine content backups. A complete infrastructure backup contains application data, password verifiers, guest-link configuration and ready image bytes. That operation is for an agency infrastructure operator with Node.js 24. Never share the encrypted backup and private key together. Use an access-controlled location outside the checkout with approved Windows ACLs or equivalent host controls.
 
-Provide a short-lived agency Cloudflare API token through the process environment as `LT360_CLOUDFLARE_TOKEN`. Scope it to the intended Cloudflare account, with access to read Worker settings and the account’s Workers subdomain and to edit D1 and Workers KV. Confirm the exact permission labels during hosted acceptance. GitHub and staff credentials are separate.
+Provide a short-lived agency Cloudflare API token through the process environment as `LT360_CLOUDFLARE_TOKEN`. Scope it to the intended Cloudflare account, with access to read Worker deployments, versions and the account’s Workers subdomain, and to edit D1 and Workers KV. GitHub and staff credentials are separate.
+
+Before maintenance, route 100% of traffic to the reviewed version. Confirm its D1 and KV bindings and pause Worker deployments and rollbacks until maintenance finishes. This helper reads the version serving traffic.
 
 Install the locked dependencies with `npm ci` in the agency’s source copy before running maintenance. Uppercase values are placeholders. The key files and backup file must use new paths.
 

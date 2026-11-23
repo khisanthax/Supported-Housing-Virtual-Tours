@@ -200,19 +200,34 @@ try {
   assert.equal((await target.query('SELECT count(*) n FROM staff_accounts'))[0].n,2);
   // Exercise production API routing against synthetic Cloudflare responses.
   const account='1'.repeat(32);
+  const activeWorker='00000000-0000-0000-0000-000000000012';
   const adapter=await openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async(url,request)=>{
     assert.match(url,new RegExp('^https://api.cloudflare.com/client/v4/accounts/'+account+'/'));
     assert.equal(request.headers.Authorization,'Bearer fixture-only');
     if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
-    if(url.endsWith('/settings'))return Response.json({success:true,result:{bindings:[
+    if(url.endsWith('/deployments'))return Response.json({success:true,result:{deployments:[
+      {created_on:'2026-11-01T00:00:00Z',versions:[{version_id:'00000000-0000-0000-0000-000000000011',percentage:100}]},
+      {created_on:'2026-11-02T00:00:00Z',versions:[{version_id:activeWorker,percentage:100}]}
+    ]}});
+    if(url.endsWith('/versions/'+activeWorker))return Response.json({success:true,result:{resources:{bindings:[
       {name:'DB',type:'d1',id:dbName},{name:'PHOTOS',type:'kv_namespace',namespace_id:kv},
       {name:'OFFICIAL_DEPLOY',type:'plain_text',text:'1'},{name:'STAFF_LOGIN',type:'durable_object_namespace',class_name:'StaffLogin'}
-    ]}});
+    ]}}});
     const input=JSON.parse(request.body);
     assert.ok(url.endsWith('/d1/database/'+dbName+'/query'));
     return Response.json({success:true,result:[{success:true,results:await site.query(input.sql,input.params)}]});
   }});
   assert.equal(adapter.origin,origin);
+  await assert.rejects(openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async url=>{
+    if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
+    assert.ok(url.endsWith('/deployments'),'Split traffic must stop before reading bindings or storage.');
+    return Response.json({success:true,result:{deployments:[
+      {created_on:'2026-11-02T00:00:00Z',versions:[
+        {version_id:activeWorker,percentage:75},
+        {version_id:'00000000-0000-0000-0000-000000000011',percentage:25}
+      ]}
+    ]}});
+  }}),/Route all traffic to one reviewed Worker version/);
   assert.match((await adapter.query('SELECT origin FROM official_installation'))[0].origin,/synthetic-agency/);
   // A genuinely different Worker deployment reuses the same storage. Miniflare
   // reloads Worker modules over its current namespace bindings.
