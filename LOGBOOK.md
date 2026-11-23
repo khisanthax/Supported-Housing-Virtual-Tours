@@ -1,5 +1,9 @@
 # Development log
 
+## Option A active storage maintenance
+
+Integrated the reviewed maintenance backport into the Option A development branch. The helper follows the version receiving 100% of live traffic and opens that version's D1 and KV bindings. Split traffic stops before storage is opened. Local acceptance and read-only hosted checks passed. The public template remains pinned to its existing release pending artifact validation and approval. Workers Paid acceptance remains deferred.
+
 ## Deployment-time setup key and website handoff · 20 November 2026
 
 Read-only checks on the isolated installation: the Worker overview showed **Visit ↗** and the full linked workers.dev hostname. Following Visit opened the website root and landed on **Set up LevelTwo360** at `/setup`. The previously observed successful recovery build printed the workers.dev URL and ended with **Success: Build completed**. The earlier button-only run failed during seed clone, so we have no evidence of a distinct fresh-install success page or its controls.
@@ -334,6 +338,3 @@ PR #52 can be presented for review. Merging needs the owner's explicit approval 
 
 The guide bundled in the pinned public template predates the hosted evidence and still describes build-token acceptance as pending. Share the current agency guide and pilot checklist from PR #52 alongside the approved Deploy link. Updating the bundled copy would require an approved template revision.
 
-## Option A active storage maintenance backport
-
-Prepared this branch from the reviewed Option A head. The maintenance helper now uses the Worker version with 100% of live traffic and opens its D1 and KV bindings. A partial or split deployment fails before the tool opens storage. Local acceptance checks the Cloudflare API selection and tests split-traffic refusal. The two verified disposable Workers confirmed active-version D1 selection after rollback. This backport requires review before integration and artifact validation before a new template release. No change to PR #52, the public template, or Workers Paid acceptance.
