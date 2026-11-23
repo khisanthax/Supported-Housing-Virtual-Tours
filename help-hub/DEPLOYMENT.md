@@ -22,15 +22,22 @@ Run the Hub and Codex in separate process environments. The Codex launcher gets 
 "LT360_HUB_*" = "exclude"
 ```
 
+On the selected operator host, use a supported Codex sandbox and run `node help-hub/operator-acceptance.mjs` with Node 24 and Codex installed. An optional final argument selects a particular Codex executable. The synthetic check authenticates MCP, verifies the bearer is absent in a sandboxed child, and verifies that a file write remains blocked. On Windows, Codex in Ubuntu WSL2 with its Linux Bubblewrap sandbox is a supported option. [Codex in WSL2](https://learn.chatgpt.com/docs/windows/wsl)
+
 Rotate the owner MCP bearer, owner approval secret and agency secrets independently. Use the Hub's documented transactional encryption-key rotation procedure. On suspected compromise, revoke the affected grants at the agency Workers, replace the credentials, and verify the retired credentials are rejected before resuming intake. [Help Hub operator guide](README.md)
 
 ## Data, backup and recovery
 
 Start with technical-only tickets. Admit data categories explicitly approved by the agency and service owner. Keep resident names, housing addresses, pictures, credentials and private logs out of ticket and note text. Approve which diagnostic or apartment details may be sent to the authorized Codex environment before allowing any real-data support.
 
-Audit events and closed tickets have a 30-day Hub retention window. Copy the SQLite database only after a clean shutdown for the pilot. Store recovery copies in separate encrypted storage with a 30-day expiration and restricted access. Keep recovery keys separate. Log the backup completion, age check and recovery receipt without ticket content or secrets.
+Audit events and closed tickets have a 30-day Hub retention window. Stop the Hub for the pilot backup or restore. Use an independent 256-bit base64url backup key from the protected `LT360_HUB_BACKUP_KEY` environment variable. The helper authenticates and encrypts the whole SQLite archive and refuses to overwrite a destination or recover an archive older than 30 days. Run it from the protected host with the source and isolated destination on private encrypted volumes. Store archives separately with 30-day provider-side expiration and keep recovery keys separate. Log completion and the recovery receipt without ticket content or secrets.
 
-Keep a protected record of manually purged ticket references outside the Hub database until all snapshots that could contain them expire. Scope the record to the same Hub database lineage. During recovery, stop intake and restore to an isolated copy. Clear the copy's `sealed`, `approved` and `session_expires` fields for pending, activating and active tickets, and close those tickets. Reapply the purge record and retention window before connecting the recovered Hub to an intake route. Separately revoke previously issued grants at each agency. Require a fresh grant for new access. Verify that an old key or session cannot be used through the recovered Hub, and that approved history remains readable.
+```sh
+node help-hub/backup.mjs backup HUB_DATABASE NEW_ARCHIVE
+node help-hub/backup.mjs restore ARCHIVE NEW_ISOLATED_DATABASE DELETION_LIST_JSON
+```
+
+Keep a protected JSON list of manually purged ticket references outside the Hub database until all snapshots that could contain them expire. Scope the list to the same Hub database, even when it is empty. During recovery, stop intake and restore to an isolated copy. The helper clears old credentials and approvals, closes pending and active tickets, and reapplies the deletion list and retention cutoff. Separately revoke previously issued grants at each agency. Require a fresh grant for new access. Verify that an old key or session cannot be used through the recovered Hub, and that approved history remains readable before connecting it to an intake route.
 
 ## Pilot gates
 
