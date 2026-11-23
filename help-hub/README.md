@@ -2,6 +2,8 @@
 
 The Help Hub is Phase B’s central ticket service and Codex MCP server. Agency Workers continue to own and enforce access. A Hub outage leaves the application, local support keys, revocation and extensions available.
 
+See the [stable deployment plan](DEPLOYMENT.md) for host selection, gateway controls, backup recovery and real-data pilot approvals.
+
 ## Agency Administrator
 
 1. Open **Request Technical Support** from the Apartment Gallery.
