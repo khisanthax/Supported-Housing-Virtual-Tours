@@ -2,10 +2,11 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up LevelTwo360</title><link rel="stylesheet" href="/official/setup.css"><script type="module" src="/official/setup.js"></script></head>
 <body><main>
 <h1>Set up LevelTwo360</h1>
-<p>Your agency website is online. Enter the temporary key you saved in Cloudflare, then choose the username and password you will use to sign in.</p>
+<p>Your agency site is online. Enter the key you saved in Cloudflare. Then choose a name and password to sign in.</p>
 <details id="configure"><summary>I lost my key or setup expired</summary>
-<p>In your Cloudflare dashboard, open <strong>Workers &amp; Pages</strong>, select this Worker, then open <strong>Settings → Variables and Secrets</strong>. Add a variable named <code>LT360_SETUP_CODE</code> with type <strong>Secret</strong>. Use the code generated below as its value and deploy the settings. The code expires after 30 minutes.</p>
-<button type="button" id="generate">Generate setup code</button>
+<p>Ask the person who runs your Cloudflare account to help. The new code lasts 30 minutes.</p>
+<ol><li>Click <strong>Make a setup code</strong> below. Copy the code and keep it private.</li><li>In Cloudflare, open <strong>Workers &amp; Pages</strong>. Choose this site. Open <strong>Settings → Variables and Secrets</strong>.</li><li>Add <code>LT360_SETUP_CODE</code>. Set its type to <strong>Secret</strong>. Paste the code and deploy the change.</li><li>Come back here. Use the new code in the setup key box.</li></ol><p>Use a new password for your Administrator account.</p>
+<button type="button" id="generate">Make a setup code</button>
 <input id="generated" type="text" readonly hidden aria-label="Generated setup code">
 </details>
 <form id="setup"><h2>Create the first Administrator</h2>
@@ -16,5 +17,5 @@
 <button>Create Administrator</button>
 </form>
 <p id="message" role="status"></p>
-<section id="ready" hidden><h2>LevelTwo360 is ready</h2><p>Your setup key has been used. Bookmark this website and sign in with your new Administrator account.</p><p><a href="/staff">Sign in to LevelTwo360</a></p><p><a href="/staff/help">Administrator help</a></p></section>
+<section id="ready" hidden><h2>LevelTwo360 is ready</h2><p>Setup is done. Save this site address. Sign in with your new name and password.</p><p><a href="/staff">Sign in to LevelTwo360</a></p><p><a href="/staff/help">Administrator help</a></p></section>
 </main></body></html>

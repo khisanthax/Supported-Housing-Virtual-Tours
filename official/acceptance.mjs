@@ -103,7 +103,7 @@ try {
   await prepare(site.db);await prepare(target.db);
   await prepare(await disabled.getD1Database('DB'));await prepare(await expired.getD1Database('DB'));
   assert.equal((await expect(first,origin,'/',303)).headers.get('Location'),'/setup');
-  assert.match(await (await expect(first,origin,'/setup',200)).text(),/temporary key you saved in Cloudflare/);
+  assert.match(await (await expect(first,origin,'/setup',200)).text(),/Enter the key you saved in Cloudflare/);
   await expect(first,origin,'/official/setup.js',200);
   await expect(first,origin,'/api/staff/accounts',503);
   await expect(first,origin,'/api/official/enroll',403,{method:'POST',body:{code:otherCode,username:'outsider',password}});

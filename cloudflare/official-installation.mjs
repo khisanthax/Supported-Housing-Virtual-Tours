@@ -13,7 +13,7 @@ const headers = {
 };
 const answer = (value, status = 200) => Response.json(value, {status, headers});
 const redirect = path => new Response(null, {status:303, headers:{...headers, Location:path}});
-const blocked = () => answer({error:'Setup is incomplete. Ask your installation owner to check the Cloudflare build and open /setup.'}, 503);
+const blocked = () => answer({error:'Setup is not done. Ask your site owner to check the build in Cloudflare. Then open your site again.'}, 503);
 const isWorkerOrigin = url => url.protocol === 'https:' && /^([a-z0-9-]+\.){2}workers\.dev$/.test(url.hostname) && !url.port;
 
 function validCode(configured, submitted, now) {
@@ -56,10 +56,10 @@ async function enroll(request, env, url, derivePassword, db) {
     ? (await db.prepare('SELECT expires FROM official_setup_window WHERE id=1').first())?.expires
     : Number(codePattern.exec(env.LT360_SETUP_CODE || '')?.[2]);
   if (!(deadline > Date.now()) || (!deployKey && !validCode(env.LT360_SETUP_CODE, input.code, Date.now())))
-    return answer({error:'Check the temporary key you saved during deployment. If you lost it or the hour has passed, open “I lost my key or setup expired”.'}, 403);
+    return answer({error:'Check the key you saved in Cloudflare. If you lost it or it ran out, open “I lost my key or setup expired”.'}, 403);
   const username = normalizeUsername(input.username);
   if (!usernamePattern.test(username) || !validNewStaffPassword(input.password))
-    return answer({error:'Use a valid username and a password of at least 15 characters and at most 256 UTF-8 bytes.'},400);
+    return answer({error:'Start your sign-in name with a letter or number. Use 3 to 64 letters, numbers, dots, dashes, or underscores. Use at least 15 characters for your password. Try a shorter password if yours is too long.'},400);
   const installation = randomBytes(16).toString('hex');
   const {verifier} = await derivePassword(input.password);
   // D1 batch means either the installation and Administrator are both committed,
@@ -67,7 +67,7 @@ async function enroll(request, env, url, derivePassword, db) {
   await env.PHOTOS.get('__lt360_binding_health__');
   const committedAt = Date.now();
   if (deadline <= committedAt)
-    return answer({error:'The setup code expired. Save a fresh code in Cloudflare.'}, 403);
+    return answer({error:'The setup code ran out. Ask your Cloudflare owner to save a new code.'}, 403);
   const results = await db.batch([
     db.prepare(`INSERT INTO official_installation(id,installation_id,origin,guest_key,created)
       SELECT 1,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM official_installation)
@@ -78,7 +78,7 @@ async function enroll(request, env, url, derivePassword, db) {
       SELECT ?,?,'administrator' WHERE EXISTS (SELECT 1 FROM official_installation WHERE id=1 AND installation_id=?)`)
       .bind(username, verifier, installation)
   ]);
-  if (results[1]?.meta?.changes !== 1) return answer({error:'Setup changed. Open the installation again.'},409);
+  if (results[1]?.meta?.changes !== 1) return answer({error:'Setup changed. Open your site again.'},409);
   return answer({ok:true});
 }
 
@@ -100,12 +100,12 @@ export async function officialRequest(request, env, serve, derivePassword, priva
     const db = env.DB.withSession('first-primary');
     const state = await db.prepare(`SELECT i.*, EXISTS(SELECT 1 FROM official_restore) restoring
       FROM (SELECT 1 as anchor) LEFT JOIN official_installation i ON i.id=anchor`).first();
-    if (state.restoring) return answer({error:'The agency installation is being restored or backed up. Try again after maintenance.'},503);
+    if (state.restoring) return answer({error:'Your team is backing up or fixing this site. Try again when the work is done.'},503);
     if (state.installation_id) {
       if (state.origin !== url.origin || !idPattern.test(state.installation_id) || !keyPattern.test(state.guest_key))
-        return answer({error:'The installation address or configuration changed. Contact your Cloudflare operator.'},403);
+        return answer({error:'The site address or settings changed. Ask your Cloudflare owner to check.'},403);
       if (!privateActor && method === 'GET' && (pathname === '/setup' || pathname === '/')) return redirect('/staff');
-      if (pathname === '/api/official/enroll') return answer({error:'Setup is complete. Sign in with your existing account.'},409);
+      if (pathname === '/api/official/enroll') return answer({error:'Setup is done. Sign in with your account.'},409);
       return serve(request, {...env, INSTALLATION_MODE:'agency', INSTALLATION_ID:state.installation_id, APP_ORIGIN:state.origin, GUEST_CODE_KEY:state.guest_key});
     }
     if (privateActor) return blocked();

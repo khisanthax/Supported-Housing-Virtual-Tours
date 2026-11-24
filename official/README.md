@@ -1,4 +1,6 @@
-# Install LevelTwo360 on your agency’s Cloudflare account
+# LevelTwo360 Option A deployment and recovery reference
+
+For the first agency pilot, start with the [plain-language setup packet](AGENCY-PILOT.md), [test checklist](PILOT.md), and [owner approval checklist](PILOT-APPROVAL.md). This reference covers the details for technical staff.
 
 ## Before you start
 
@@ -13,7 +15,7 @@ Use the official link for the reviewed public template. Cloudflare copies the de
 Enter your permanent Administrator password only on the LevelTwo360 site after deployment.
 
 1. Open the supplied **Deploy to Cloudflare** link. Sign in to the agency’s Cloudflare account or create it using the agency’s onboarding process. Select the intended account.
-2. Connect GitHub using your named login. Grant the Workers & Pages app access to the deployment repository in the agency’s GitHub organization. An organization owner or app manager may need to authorize it. Verify the repository owner and visibility before continuing. Use a private agency copy when offered.
+2. Connect GitHub using your named login. Grant the Workers & Pages app access to the deployment repository in the agency’s GitHub organization. An organization owner or app manager may need to authorize it. Verify the repository owner and visibility before continuing. Confirm the agency copy is private before proceeding. If the app asks for an existing repository before the destination exists, select an approved empty private repository controlled by the agency. Have the GitHub owner confirm that the final deployment repository also has access.
 3. Choose a unique project name and new storage for your agency. In **LT360_INSTALL_KEY**, enter a unique password-manager-generated setup key of 24–128 printable ASCII characters without spaces. Save it for the next step. Use a different password when creating your Administrator. Keep the supplied build and deploy commands.
 4. Click **Deploy** once. Workers Builds runs `npm run build` for the shared assets and `npm run deploy` to apply tracked D1 migrations by binding and deploy the Worker. SQLite Durable Object migrations use Wrangler. Watch the build before retrying a failure. Keep the same repository, Worker and resource IDs on retry. Clicking the original button for a new repository is a new installation.
 5. Wait for **Success: Build completed**. Open the **workers.dev** address in the build output, or select **Visit ↗** on the Worker overview. Opening the website takes you directly to Administrator setup.
@@ -24,25 +26,9 @@ A failed build may leave resources provisioned. Review **Builds** and the select
 
 ## Backups and recovery
 
-The [pilot checklist](PILOT.md) includes common installation issues, who handles recovery and what to verify before sharing tours.
+For the pilot, follow the [operator maintenance guide](PILOT-MAINTENANCE.md). It pins the corrected helper to the tested full commit and documents shell setup, account scoping, target receipt verification, backup and restore. Keep that checkout separate from the agency deployment branch. The public Deploy template bundles an earlier helper that can select inactive storage after a rollback.
 
-Use the existing [encrypted apartment export](../BACKUPS.md) for routine content backups. A complete infrastructure backup contains application data, password verifiers, guest-link configuration and ready image bytes. That operation is for an agency infrastructure operator with Node.js 24. Never share the encrypted backup and private key together. Use an access-controlled location outside the checkout with approved Windows ACLs or equivalent host controls.
-
-Provide a short-lived agency Cloudflare API token through the process environment as `LT360_CLOUDFLARE_TOKEN`. Scope it to the intended Cloudflare account, with access to read Worker deployments, versions and the account’s Workers subdomain, and to edit D1 and Workers KV. GitHub and staff credentials are separate.
-
-Use the corrected Option A maintenance tool. If you installed from the pinned public template, ask your pilot coordinator for the exact reviewed revision on the [Option A integration branch](https://github.com/khisanthax/Supported-Housing-Virtual-Tours/tree/codex/option-a-active-storage) and use it in a separate checkout. The helper bundled in the pinned template can select inactive storage after a rollback.
-
-Run `inspect` and compare the website, Worker version, D1 database ID and KV namespace ID with your agency’s installation and Cloudflare records. Confirm all traffic is routed to that reviewed version. Set `LT360_MAINTENANCE_TARGET` to the `targetReceipt` returned by `inspect` before running backup, restore or unlock. Use the source Worker’s receipt for backup and the destination Worker’s receipt for restore. Keep the inspection output in agency-controlled storage. Pause automated deployments and coordinate with anyone who can deploy or change bindings until the operation finishes. Cloudflare does not provide an exclusive maintenance lock across Workers, D1 and KV. If the target changed, verify the intended resources before running `inspect` again. Revoke the API token when the job is done.
-
-Install the locked dependencies with `npm ci` in the reviewed maintenance checkout, separate from the agency deployment branch. Uppercase values are placeholders. The key files and backup file must use new paths.
-
-```text
-npm run agency:maintenance -- keys PRIVATE_KEY_FILE PUBLIC_KEY_FILE
-npm run agency:maintenance -- inspect ACCOUNT_ID WORKER_NAME
-npm run agency:maintenance -- backup ACCOUNT_ID WORKER_NAME BACKUP_FILE PUBLIC_KEY_FILE
-npm run agency:maintenance -- inspect TARGET_ACCOUNT_ID TARGET_WORKER_NAME
-npm run agency:maintenance -- restore TARGET_ACCOUNT_ID TARGET_WORKER_NAME BACKUP_FILE PRIVATE_KEY_FILE TRUSTED_SHA256
-```
+Use the [encrypted apartment export](../BACKUPS.md) for routine content backups. Full infrastructure archives also contain password verifiers and guest-link state. Store archives and recovery keys separately in protected agency storage outside the checkout. Pause deployment changes during all maintenance. Cloudflare provides no exclusive lock that covers Workers, D1, and KV together.
 
 - **Backup** pauses staff and guest access. The database blocks writes already in flight. Backups cover every ready image listed in D1, even when a KV listing omits it. The tool authenticates and decrypts the encrypted file locally for a restore check before reporting the SHA-256. Store that reference separately with the backup date, app revision and Worker configuration receipt. Store a separate copy of the agency repository and its dependency lockfile. Reserved uploads, sessions and transient diagnostic counters are recreated or require sign-in again.
 - **Restore** first deploys the matching reviewed revision to a new Worker with independent D1 and KV resources. Leave its Administrator unclaimed. If the deployment form requires a temporary setup key, use a fresh random value and skip enrollment. Run restore against that Worker. The tool checks the trusted digest, database schema and required image bytes, restores staff accounts and guest-verification state, and pins the new URL only after copying and verifying records. Then sign in again and verify the recovered apartments and policies. Give guests the new site address and reissue invitations when needed. Restore refuses to overwrite an initialized installation.

@@ -34,7 +34,7 @@ form.onsubmit = async event => {
     document.querySelector('#ready a').focus();
     output.textContent = 'Administrator created.';
   } catch {
-    output.textContent = 'Connection interrupted. Refresh to check whether setup completed.';
+    output.textContent = 'The connection stopped. Reload this page to see if setup is done.';
   } finally {
     form.elements.password.value = form.elements.confirmation.value = '';
     button.disabled = false;
