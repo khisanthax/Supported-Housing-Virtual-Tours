@@ -2,7 +2,7 @@
 
 ## Before you start
 
-Choose an installation owner authorized to manage the agency’s GitHub organization and Cloudflare account. Give a second authorized agency employee recovery access to both. Everyday staff sign in to LevelTwo360 separately.
+Choose an installation owner authorized to manage the agency’s GitHub organization and Cloudflare account. Give a second authorized agency employee recovery access to both. Everyday staff sign in to LevelTwo360 separately. The agency can install, manage staff and tours, invite guests, back up, recover and update without a Help Hub or Codex. For pilot assistance, use the support contact agreed with the pilot coordinator. Keep passwords, API tokens and recovery keys in agency-controlled storage.
 
 Cloudflare manages your subscription. The limited pilot uses Workers Free, which passed hosted acceptance. The owner deferred Workers Paid hosted testing for a separate run. Setup requires Workers Builds, Worker assets, D1, KV and SQLite Durable Objects. Free usage limits can interrupt service. Paid usage and builds can incur charges. Your agency monitors usage and costs. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 
@@ -30,9 +30,9 @@ Use the existing [encrypted apartment export](../BACKUPS.md) for routine content
 
 Provide a short-lived agency Cloudflare API token through the process environment as `LT360_CLOUDFLARE_TOKEN`. Scope it to the intended Cloudflare account, with access to read Worker deployments, versions and the account’s Workers subdomain, and to edit D1 and Workers KV. GitHub and staff credentials are separate.
 
-Before maintenance, route 100% of traffic to the reviewed version. Confirm its D1 and KV bindings and pause Worker deployments and rollbacks until maintenance finishes. This helper reads the version serving traffic.
+For this pilot, use a separate local copy of the [reviewed Option A maintenance revision](https://github.com/khisanthax/Supported-Housing-Virtual-Tours/tree/859d04bb91eb76103dad29ede1dffd503bcd8dab). The helper bundled in the pinned Deploy template can select the last uploaded bindings after a rollback. The reviewed helper reads the version serving 100% of traffic and stops on split traffic. Confirm the active Worker and its D1 and KV bindings. Pause automated deployments and coordinate with anyone who can deploy or change bindings until maintenance finishes. Run `inspect` to check access before backup or recovery. Revoke the token when the job is done.
 
-Install the locked dependencies with `npm ci` in the agency’s source copy before running maintenance. Uppercase values are placeholders. The key files and backup file must use new paths.
+Install the locked dependencies with `npm ci` in the reviewed maintenance checkout, separate from the agency deployment branch. Uppercase values are placeholders. The key files and backup file must use new paths.
 
 ```text
 npm run agency:maintenance -- keys PRIVATE_KEY_FILE PUBLIC_KEY_FILE
