@@ -47,31 +47,52 @@ export async function openInstallation({account,worker,token,fetcher=fetch}){
     return result;
   }
   const script='/workers/scripts/'+worker;
-  const [{result:history},{result:domain}]=await Promise.all([
-    api(script+'/deployments'),api('/workers/subdomain')
-  ]);
-  const deployments=history?.deployments;
-  if(!Array.isArray(deployments)||!deployments.length||deployments.some(item=>!Number.isFinite(Date.parse(item.created_on))))
-    throw new MaintenanceError('Cloudflare did not identify the active Worker deployment.');
-  const latest=[...deployments].sort((a,b)=>Date.parse(b.created_on)-Date.parse(a.created_on))[0];
-  const [active]=latest.versions??[];
-  if(latest.versions?.length!==1||active?.percentage!==100||!uuid.test(active.version_id??''))
-    throw new MaintenanceError('Route all traffic to one reviewed Worker version before maintenance.');
-  // Script settings can describe a newer upload than the version serving traffic.
-  const {result:version}=await api(script+'/versions/'+active.version_id);
-  const binding = (bindingName,type) => version?.resources?.bindings?.find(item=>item.name===bindingName&&item.type===type);
-  const database = binding('DB','d1')?.id;
-  const namespace = binding('PHOTOS','kv_namespace')?.namespace_id;
-  if (!uuid.test(database??'') || !id.test(namespace??'') || !name.test(domain.subdomain??'') ||
-      binding('OFFICIAL_DEPLOY','plain_text')?.text!=='1' ||
-      binding('STAFF_LOGIN','durable_object_namespace')?.class_name!=='StaffLogin' ||
-      (binding('STAFF_LOGIN','durable_object_namespace').script_name &&
-       binding('STAFF_LOGIN','durable_object_namespace').script_name!==worker))
-    throw new MaintenanceError('Select an Option A Worker with its own D1, KV and StaffLogin bindings.');
-  const origin='https://'+worker+'.'+domain.subdomain+'.workers.dev';
+  async function resolveTarget(){
+    const [{result:history},{result:domain}]=await Promise.all([
+      api(script+'/deployments'),api('/workers/subdomain')
+    ]);
+    const deployments=history?.deployments;
+    if(!Array.isArray(deployments)||!deployments.length||deployments.some(item=>!Number.isFinite(Date.parse(item?.created_on))))
+      throw new MaintenanceError('Cloudflare did not identify the active Worker deployment.');
+    const [latest,previous]=[...deployments].sort((a,b)=>Date.parse(b.created_on)-Date.parse(a.created_on));
+    if(!uuid.test(latest.id??'')||(previous&&Date.parse(latest.created_on)===Date.parse(previous.created_on)))
+      throw new MaintenanceError('Cloudflare reported an ambiguous active Worker deployment.');
+    const versions=latest.versions;
+    const active=Array.isArray(versions)&&versions.length===1 ? versions[0] : null;
+    if(active?.percentage!==100||!uuid.test(active.version_id??''))
+      throw new MaintenanceError('Route all traffic to one reviewed Worker version before maintenance.');
+    // Script settings can describe a newer upload than the version serving traffic.
+    const {result:version}=await api(script+'/versions/'+active.version_id);
+    const bindings=version?.resources?.bindings;
+    if(version?.id!==active.version_id||!Array.isArray(bindings)||!name.test(domain?.subdomain??''))
+      throw new MaintenanceError('Cloudflare returned inconsistent active Worker version details.');
+    function binding(bindingName,type){
+      const matches=bindings.filter(item=>item?.name===bindingName);
+      return matches.length===1&&matches[0].type===type ? matches[0] : null;
+    }
+    const database=binding('DB','d1')?.id;
+    const namespace=binding('PHOTOS','kv_namespace')?.namespace_id;
+    const login=binding('STAFF_LOGIN','durable_object_namespace');
+    if(!uuid.test(database??'')||database==='00000000-0000-0000-0000-000000000001'||
+       !id.test(namespace??'')||namespace==='00000000000000000000000000000001'||
+       binding('OFFICIAL_DEPLOY','plain_text')?.text!=='1'||login?.class_name!=='StaffLogin'||
+       (login.script_name&&login.script_name!==worker))
+      throw new MaintenanceError('Select an Option A Worker with its own unambiguous D1, KV and StaffLogin bindings.');
+    return {origin:'https://'+worker+'.'+domain.subdomain+'.workers.dev',
+      deployment:latest.id,version:active.version_id,database,namespace};
+  }
+  const target=await resolveTarget();
+  const {origin,database,namespace}=target;
+  const fingerprint=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const targetReceipt=fingerprint([account,worker,target]);
+  const storageIdentity=fingerprint([account,worker,origin,database,namespace]);
+  async function assertCurrent(){
+    if(fingerprint([account,worker,await resolveTarget()])!==targetReceipt)
+      throw new MaintenanceError('The active Worker or its bindings changed. Check the intended resources and run inspect again.');
+  }
   const kv='/storage/kv/namespaces/'+namespace;
   return {
-    origin, worker,
+    origin, worker, target, targetReceipt, storageIdentity, assertCurrent,
     async query(sql,params=[]){
       const {result}=await api('/d1/database/'+database+'/query',{method:'POST',body:{sql,params}});
       if (!Array.isArray(result) || result.length!==1 || result[0]?.success!==true) throw new MaintenanceError('D1 could not complete the requested operation.');
@@ -103,6 +124,7 @@ export async function backUp(site,{path,publicKey}){
   const {query}=site;
   const state=await getState(query);
   if (!state || state.origin!==site.origin) throw new MaintenanceError('The selected Worker does not match an initialized installation.');
+  await site.assertCurrent?.();
   const lock='backup:'+randomBytes(16).toString('hex');
   const claimed=await query('INSERT INTO official_restore(id,source_digest) VALUES(1,?) ON CONFLICT DO NOTHING RETURNING id',[lock]);
   if (!claimed.length) throw new MaintenanceError('The agency installation is already in maintenance.');
@@ -114,12 +136,14 @@ export async function backUp(site,{path,publicKey}){
     }
     // Ready photos are authoritative. Reserved or deleting KV objects are not
     // required to restore any application-visible photo.
-    return await createSnapshot({path,publicKey,query,listImages:async function*(){},
+    const receipt=await createSnapshot({path,publicKey,query,listImages:async function*(){},
       readImage:key=>{
         if (!validImageName(key)) throw new MaintenanceError('Unexpected photo identifier.');
         return site.readImage(key);
       },
       configuration:{edition:'lt360-official',installation:state.installation_id,origin:state.origin}});
+    await site.assertCurrent?.();
+    return receipt;
   } finally {
     await releaseLock(query,lock);
   }
@@ -193,14 +217,27 @@ async function restoreImage(site,key,bytes){
 async function restoreVerifiedCopy(site,{path,privateKey,expectedDigest}){
   if (!digest.test(expectedDigest??'') || await fileDigest(path)!==expectedDigest) throw new MaintenanceError('The file does not match the trusted backup SHA-256.');
   const {query}=site;
+  await site.assertCurrent?.();
   const previous=await getState(query);
-  if(previous?.restored_from===expectedDigest&&previous.origin===site.origin)return;
+  if(previous?.restored_from===expectedDigest&&previous.origin===site.origin){
+    const verified=await verifySnapshot(path,{privateKey,onImage:async(key,bytes)=>{
+      if(!validImageName(key)||!(await site.readImage(key)).equals(bytes))
+        throw new MaintenanceError('The recovered installation does not match the archive image storage.');
+    }});
+    verified.database.close();
+    await site.assertCurrent?.();
+    return;
+  }
   if(previous)throw new MaintenanceError('Choose a fresh destination. Restore cannot overwrite an existing installation.');
   const targetSchema=await snapshotSchema(query);
   const snapshot=await verifySnapshot(path,{privateKey,expectedSchema:targetSchema});
   const {database,configuration}=snapshot;
   const lock='restore:'+expectedDigest;
-  const owner=randomBytes(16).toString('hex');
+  // Keep a storage fingerprint in the existing owner field between attempts.
+  // The original archive marker still lets the existing completion trigger clear the lock.
+  const idleOwner=site.storageIdentity??null;
+  const attempt=randomBytes(16).toString('hex');
+  const owner=idleOwner ? idleOwner+'.'+attempt : attempt;
   try{
     const source=database.prepare('SELECT * FROM official_installation WHERE id=1').get();
     if(configuration.edition!=='lt360-official'||!source||source.installation_id!==configuration.installation||
@@ -211,25 +248,31 @@ async function restoreVerifiedCopy(site,{path,privateKey,expectedDigest}){
     const existing=await getLock(query);
     if(!existing){
       await requireEmpty(site,tables);
+      await site.assertCurrent?.();
       const acquired=await query(`INSERT INTO official_restore SELECT 1,?,? WHERE NOT EXISTS (SELECT 1 FROM official_installation)
         AND NOT EXISTS (SELECT 1 FROM staff_accounts) ON CONFLICT DO NOTHING RETURNING id`,[lock,owner]);
       if(!acquired.length)throw new MaintenanceError('The destination changed while starting restore.');
     }else {
       if(existing.source_digest!==lock)throw new MaintenanceError('The destination is reserved for another maintenance operation.');
-      const acquired=await query('UPDATE official_restore SET owner=? WHERE id=1 AND source_digest=? AND owner IS NULL RETURNING id',[owner,lock]);
-      if(!acquired.length)throw new MaintenanceError('A restore still owns the destination. If it stopped, clear only its exact owner marker.');
+      if(existing.owner!==idleOwner)
+        throw new MaintenanceError('Restore is still owned or its storage cannot be verified. Keep the destination closed and check the original bindings.');
+      await site.assertCurrent?.();
+      const acquired=await query('UPDATE official_restore SET owner=? WHERE id=1 AND source_digest=? AND owner IS ? RETURNING id',[owner,lock,idleOwner]);
+      if(!acquired.length)throw new MaintenanceError('A restore already owns the destination.');
     }
     const images=await verifySnapshot(path,{privateKey,expectedSchema:targetSchema,onImage:(key,bytes)=>restoreImage(site,key,bytes)});
     images.database.close();
+    await site.assertCurrent?.();
     for (const table of [...parentOrder.filter(table=>tables.includes(table)),...tables.filter(table=>!parentOrder.includes(table))])
       await copyTable(query,database,table,lock);
+    await site.assertCurrent?.();
     const opened=await query(`INSERT INTO official_installation(id,installation_id,origin,guest_key,created,restored_from)
       SELECT 1,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM official_restore WHERE id=1 AND source_digest=? AND owner=?)
       ON CONFLICT DO NOTHING RETURNING id`,[source.installation_id,site.origin,source.guest_key,source.created,expectedDigest,lock,owner]);
     if(!opened.length)throw new MaintenanceError('The destination changed before it could be activated.');
   }finally{
     database.close();
-    await query('UPDATE official_restore SET owner=NULL WHERE id=1 AND source_digest=? AND owner=?',[lock,owner]);
+    await query('UPDATE official_restore SET owner=? WHERE id=1 AND source_digest=? AND owner=?',[idleOwner,lock,owner]);
   }
 }
 
@@ -257,7 +300,15 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
     }else if((action==='backup'&&args.length===4)||(action==='restore'&&args.length===5)||(action==='inspect'&&args.length===2)||(action==='unlock-backup'&&args.length===3)||(action==='unlock-restore'&&args.length===4)){
       const [account,worker,path,key,expectedDigest]=args;
       const site=await openInstallation({account,worker,token:process.env.LT360_CLOUDFLARE_TOKEN});
-      if(action==='inspect')console.log(JSON.stringify({origin:site.origin,initialized:!!await getState(site.query),maintenance:await getLock(site.query)??null}));
+      if(action==='inspect'){
+        const state=await getState(site.query);
+        if(state&&state.origin!==site.origin)throw new MaintenanceError('The D1 database belongs to a different installation.');
+        console.log(JSON.stringify({...site.target,targetReceipt:site.targetReceipt,initialized:!!state,maintenance:await getLock(site.query)??null}));
+      }else {
+        if(process.env.LT360_MAINTENANCE_TARGET!==site.targetReceipt)
+          throw new MaintenanceError('Run inspect and confirm the active version and bindings against your agency records. Set LT360_MAINTENANCE_TARGET to the inspected targetReceipt.');
+        await site.assertCurrent();
+      }
       if(action==='backup'){
         await protectedOutput(path);
         console.log(JSON.stringify(await backUp(site,{path,publicKey:JSON.parse(await readFile(key,'utf8'))})));
@@ -271,8 +322,8 @@ if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url))
         if(!(await releaseLock(site.query,path)).length)throw new MaintenanceError('That backup marker does not own the lock.');
       }
       if(action==='unlock-restore'){
-        if(!/^restore:[a-f0-9]{64}$/.test(path??'') || !id.test(key??''))throw new MaintenanceError('Confirm the exact stopped restore marker and owner from inspect.');
-        if(!(await site.query('UPDATE official_restore SET owner=NULL WHERE id=1 AND source_digest=? AND owner=? RETURNING id',[path,key])).length)
+        if(!/^restore:[a-f0-9]{64}$/.test(path??'') || !key?.startsWith(site.storageIdentity+'.') || !id.test(key.slice(65)))throw new MaintenanceError('Confirm the exact stopped restore marker and owner from inspect.');
+        if(!(await site.query('UPDATE official_restore SET owner=? WHERE id=1 AND source_digest=? AND owner=? RETURNING id',[site.storageIdentity,path,key])).length)
           throw new MaintenanceError('That restore marker and owner are no longer active.');
       }
     }else throw new MaintenanceError('Use keys PRIVATE PUBLIC, backup ACCOUNT WORKER BACKUP PUBLIC, restore ACCOUNT WORKER BACKUP PRIVATE SHA256, inspect ACCOUNT WORKER, unlock-backup ACCOUNT WORKER MARKER, or unlock-restore ACCOUNT WORKER MARKER OWNER.');

@@ -59,7 +59,7 @@ const toSite=async (mf,siteOrigin)=>{
   const db=await mf.getD1Database('DB');
   const photos=await mf.getKVNamespace('PHOTOS');
   return {
-    origin:siteOrigin,db,photos,
+    origin:siteOrigin,db,photos,storageIdentity:siteOrigin===origin?'a'.repeat(64):'b'.repeat(64),
     query:async(sql,params=[])=>(await db.prepare(sql).bind(...params).all()).results,
     async *listImages(){yield* (await photos.list()).keys;},
     readImage:async(key)=>{
@@ -189,7 +189,12 @@ try {
     failed=true;await target.writeImage(key,bytes);throw Error('Synthetic interrupted transfer');
   }},recovery),/interrupted transfer/);
   await expect(second,restoredOrigin,'/setup',503);
+  await assert.rejects(restore({...target,storageIdentity:'c'.repeat(64),writeImage:()=>assert.fail('wrong KV write')},recovery),
+    /storage cannot be verified/);
   await restore(target,recovery);await restore(target,recovery);
+  await assert.rejects(restore({...target,readImage:async()=>Buffer.from('wrong namespace')},recovery),/does not match the archive image storage/);
+  for(const table of ['versions','permissions','staff_accounts','uac_policy'])
+    assert.deepEqual(await target.query('SELECT * FROM '+table+' ORDER BY rowid'),await site.query('SELECT * FROM '+table+' ORDER BY rowid'));
   assert.deepEqual(await target.query('SELECT * FROM access_history'),savedAudit);
   for(const id of Object.values(photos))assert.deepEqual(await target.readImage(id),await site.readImage(id));
   const newCookie=await login(second,restoredOrigin);
@@ -198,37 +203,74 @@ try {
   await expect(second,restoredOrigin,'/api/official/enroll',409,{method:'POST',body:{code:otherCode,username:'cannot-reset',password}});
   await expect(second,restoredOrigin,'/api/guest/unlock',200,{method:'POST',body:invitation});
   assert.equal((await target.query('SELECT count(*) n FROM staff_accounts'))[0].n,2);
-  // Exercise production API routing against synthetic Cloudflare responses.
+  // Model a rollback to an older upload, with distinct D1 and KV on the newer version.
   const account='1'.repeat(32);
-  const activeWorker='00000000-0000-0000-0000-000000000012';
-  const adapter=await openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async(url,request)=>{
+  const older='00000000-0000-0000-0000-000000000012';
+  const newer='00000000-0000-0000-0000-000000000013';
+  const liveDb='00000000-0000-0000-0000-000000000020';
+  const liveKv='2'.repeat(32);
+  const deployed=(version,date,tail)=>({
+    id:'00000000-0000-0000-0000-0000000000'+tail,created_on:date,versions:[{version_id:version,percentage:100}]
+  });
+  const upgrade=deployed(newer,'2026-11-01T00:00:00Z','31');
+  const rollback=deployed(older,'2026-11-02T00:00:00Z','32');
+  let deployments=[upgrade,rollback], databaseOverride, namespaceOverride, extraBindings=[], wrongVersion=false;
+  let storageCalls=0;
+  const open=()=>openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async(url,request)=>{
     assert.match(url,new RegExp('^https://api.cloudflare.com/client/v4/accounts/'+account+'/'));
     assert.equal(request.headers.Authorization,'Bearer fixture-only');
-    if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
-    if(url.endsWith('/deployments'))return Response.json({success:true,result:{deployments:[
-      {created_on:'2026-11-01T00:00:00Z',versions:[{version_id:'00000000-0000-0000-0000-000000000011',percentage:100}]},
-      {created_on:'2026-11-02T00:00:00Z',versions:[{version_id:activeWorker,percentage:100}]}
-    ]}});
-    if(url.endsWith('/versions/'+activeWorker))return Response.json({success:true,result:{resources:{bindings:[
-      {name:'DB',type:'d1',id:dbName},{name:'PHOTOS',type:'kv_namespace',namespace_id:kv},
-      {name:'OFFICIAL_DEPLOY',type:'plain_text',text:'1'},{name:'STAFF_LOGIN',type:'durable_object_namespace',class_name:'StaffLogin'}
-    ]}}});
-    const input=JSON.parse(request.body);
-    assert.ok(url.endsWith('/d1/database/'+dbName+'/query'));
-    return Response.json({success:true,result:[{success:true,results:await site.query(input.sql,input.params)}]});
+    const respond=result=>Response.json({success:true,result});
+    if(url.endsWith('/subdomain'))return respond({subdomain:'test-account'});
+    if(url.endsWith('/deployments'))return respond({deployments});
+    if(url.includes('/versions/')){
+      const version=url.split('/').at(-1);
+      assert.ok([older,newer].includes(version));
+      return respond({id:wrongVersion?newer:version,resources:{bindings:[
+        {name:'DB',type:'d1',id:databaseOverride??(version===older?liveDb:'00000000-0000-0000-0000-000000000021')},
+        {name:'PHOTOS',type:'kv_namespace',namespace_id:namespaceOverride??(version===older?liveKv:'4'.repeat(32))},
+        {name:'OFFICIAL_DEPLOY',type:'plain_text',text:'1'},{name:'STAFF_LOGIN',type:'durable_object_namespace',class_name:'StaffLogin'},
+        ...extraBindings
+      ]}});
+    }
+    storageCalls++;
+    if(url.endsWith('/d1/database/'+liveDb+'/query')){
+      const input=JSON.parse(request.body);
+      return respond([{success:true,results:await site.query(input.sql,input.params)}]);
+    }
+    if(url.includes('/storage/kv/namespaces/'+liveKv+'/values/'))
+      return new Response(await site.readImage(url.split('/').at(-1)));
+    assert.fail('Maintenance selected unapproved storage or script settings.');
   }});
+  const adapter=await open();
+  await adapter.assertCurrent();
   assert.equal(adapter.origin,origin);
-  await assert.rejects(openInstallation({account,worker:'synthetic-agency',token:'fixture-only',fetcher:async url=>{
-    if(url.endsWith('/subdomain'))return Response.json({success:true,result:{subdomain:'test-account'}});
-    assert.ok(url.endsWith('/deployments'),'Split traffic must stop before reading bindings or storage.');
-    return Response.json({success:true,result:{deployments:[
-      {created_on:'2026-11-02T00:00:00Z',versions:[
-        {version_id:activeWorker,percentage:75},
-        {version_id:'00000000-0000-0000-0000-000000000011',percentage:25}
-      ]}
-    ]}});
-  }}),/Route all traffic to one reviewed Worker version/);
-  assert.match((await adapter.query('SELECT origin FROM official_installation'))[0].origin,/synthetic-agency/);
+  assert.equal(adapter.target.version,older);
+  assert.equal((await adapter.query('SELECT origin FROM official_installation'))[0].origin,origin);
+  assert.deepEqual(await adapter.readImage(missing),await site.readImage(missing));
+  const baselineCalls=storageCalls;
+  deployments=[upgrade,{...rollback,versions:[{version_id:older,percentage:75},{version_id:newer,percentage:25}]}];
+  await assert.rejects(open(),/Route all traffic to one reviewed Worker version/);
+  deployments=[upgrade,{...rollback,created_on:upgrade.created_on}];
+  await assert.rejects(open(),/ambiguous active Worker deployment/);
+  deployments=[rollback];
+  wrongVersion=true;
+  await assert.rejects(open(),/inconsistent active Worker version/);
+  wrongVersion=false;
+  extraBindings=[{name:'DB',type:'d1',id:liveDb}];
+  await assert.rejects(open(),/unambiguous D1, KV/);
+  extraBindings=[];
+  databaseOverride=dbName;
+  await assert.rejects(open(),/unambiguous D1, KV/);
+  databaseOverride=undefined;
+  namespaceOverride='invalid';
+  await assert.rejects(open(),/unambiguous D1, KV/);
+  namespaceOverride='3'.repeat(32);
+  await assert.rejects(adapter.assertCurrent(),/version|bindings changed/);
+  assert.notEqual((await open()).targetReceipt,adapter.targetReceipt);
+  namespaceOverride=undefined;
+  deployments=[{...rollback,id:upgrade.id,versions:[{version_id:newer,percentage:100}]}];
+  await assert.rejects(adapter.assertCurrent(),/bindings changed/);
+  assert.equal(storageCalls,baselineCalls,'Unsafe inventory must fail before D1 or KV access.');
   // A genuinely different Worker deployment reuses the same storage. Miniflare
   // reloads Worker modules over its current namespace bindings.
   const upgraded=source.replace('version: "0.2.0"','version: "0.2.1"');
